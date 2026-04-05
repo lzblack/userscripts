@@ -422,9 +422,300 @@
   }
 
   // ============================================================
-  // 占位初始化 — 后续任务中将替换为完整流程
+  // Renderer — 确定性插槽式 UI 渲染
   // ============================================================
 
-  var meta = extractMeta();
-  deps.log('Page type:', meta.type, '| Meta:', meta);
+  function ensureStyles() {
+    if (document.getElementById('rating-hub-style')) return;
+    var style = document.createElement('style');
+    style.id = 'rating-hub-style';
+    style.textContent = [
+      '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
+      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; }',
+      '.rating-hub-label { color: #37a; text-decoration: none; min-width: 90px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
+      '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
+      '.rating-hub-label.no-link { cursor: default; }',
+      '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
+      '.rating-hub-score { font-weight: bold; color: #333; }',
+      '.rating-hub-count { color: #999; }',
+      '.rating-hub-status { color: #999; }',
+      '.rating-hub-status a { color: #37a; text-decoration: none; }',
+      '.rating-hub-status a:hover { text-decoration: underline; }',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function createSlots(channels) {
+    var anchor = document.querySelector('#interest_sectl') || document.querySelector('#wrapper');
+    if (!anchor) return null;
+
+    var container = document.createElement('div');
+    container.className = 'rating-hub-container';
+    container.setAttribute('data-rating-hub', '1');
+
+    channels.forEach(function (ch) {
+      var row = document.createElement('div');
+      row.className = 'rating-hub-row';
+      row.setAttribute('data-channel', ch.channelKey);
+
+      var label = document.createElement('span');
+      label.className = 'rating-hub-label no-link';
+      label.textContent = ch.label;
+
+      var status = document.createElement('span');
+      status.className = 'rating-hub-status';
+      status.textContent = '加载中...';
+
+      row.appendChild(label);
+      row.appendChild(status);
+      container.appendChild(row);
+    });
+
+    anchor.appendChild(container);
+    return container;
+  }
+
+  function fillSlot(channelKey, result) {
+    var row = document.querySelector('.rating-hub-row[data-channel="' + channelKey + '"]');
+    if (!row) return;
+
+    // 重建行内容：label + 状态区
+    var label = row.querySelector('.rating-hub-label');
+
+    // 先清空旧状态区（label 保留）
+    while (row.lastChild !== label) {
+      row.removeChild(row.lastChild);
+    }
+
+    var status = result.status;
+
+    if (status === 'success') {
+      // Label → 可点击链接
+      var a = document.createElement('a');
+      a.className = 'rating-hub-label';
+      a.href = result.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = label.textContent;
+      row.replaceChild(a, label);
+
+      var scoreEl = document.createElement('span');
+      scoreEl.className = 'rating-hub-score';
+      scoreEl.textContent = result.score;
+      row.appendChild(scoreEl);
+
+      if (result.count) {
+        var countEl = document.createElement('span');
+        countEl.className = 'rating-hub-count';
+        countEl.textContent = '(' + result.count + ')';
+        row.appendChild(countEl);
+      }
+
+    } else if (status === 'no_match' || status === 'no_rating') {
+      var a = document.createElement('a');
+      a.className = 'rating-hub-label';
+      a.href = result.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = label.textContent;
+      row.replaceChild(a, label);
+
+      var statusEl = document.createElement('span');
+      statusEl.className = 'rating-hub-status';
+      statusEl.textContent = status === 'no_match' ? '未收录' : '暂无评分';
+      row.appendChild(statusEl);
+
+    } else if (status === 'rate_limited') {
+      var statusEl = document.createElement('span');
+      statusEl.className = 'rating-hub-status';
+      statusEl.textContent = '请求频繁，稍后重试';
+      row.appendChild(statusEl);
+
+    } else if (status === 'disabled') {
+      var statusEl = document.createElement('span');
+      statusEl.className = 'rating-hub-status';
+      var configLink = document.createElement('a');
+      configLink.href = '#';
+      configLink.textContent = '未配置 API Key';
+      configLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        openConfigPanel(sources);
+      });
+      statusEl.appendChild(configLink);
+      row.appendChild(statusEl);
+
+    } else if (status === 'coexist_skip') {
+      var statusEl = document.createElement('span');
+      statusEl.className = 'rating-hub-status';
+      statusEl.textContent = '已由其他脚本提供';
+      row.appendChild(statusEl);
+
+    } else {
+      // error (and any unknown status)
+      var statusEl = document.createElement('span');
+      statusEl.className = 'rating-hub-status';
+      statusEl.textContent = '加载失败';
+      row.appendChild(statusEl);
+    }
+  }
+
+  // ============================================================
+  // Registry — 评分来源注册表
+  // ============================================================
+
+  var sources = [];
+
+  function getApplicableSources(type, config, meta) {
+    return sources.filter(function (source) {
+      // 必须支持当前条目类型
+      if (!source.types || source.types.indexOf(type) === -1) return false;
+      // 用户已禁用
+      if (config.enabledSources[source.key] === false) return false;
+      // anydb 仅在动画类型时启用
+      if (source.key === 'anydb' && meta.genres.indexOf('动画') === -1) return false;
+      return true;
+    });
+  }
+
+  // ============================================================
+  // Scheduler — 并发抓取、缓存、限流、共存检测
+  // ============================================================
+
+  function checkCoexistence() {
+    if (document.getElementById('douban-neodb-rating-style')) return true;
+    var thirdParty = document.querySelector('.douban-thirdparty-rating');
+    if (thirdParty && thirdParty.textContent.indexOf('NeoDB') !== -1) return true;
+    return false;
+  }
+
+  function isCooldownActive(sourceKey) {
+    var entry = deps.storage.get('rh:cooldown:' + sourceKey);
+    if (!entry) return false;
+    if (Date.now() > entry.until) {
+      deps.storage.remove('rh:cooldown:' + sourceKey);
+      return false;
+    }
+    return true;
+  }
+
+  function setCooldown(sourceKey) {
+    deps.storage.set('rh:cooldown:' + sourceKey, { until: Date.now() + 5 * 60 * 1000 });
+  }
+
+  function fetchAll(applicableSources, meta, config, onChannelReady) {
+    applicableSources.forEach(function (source) {
+      var channelKeys = source.channels.map(function (ch) { return ch.channelKey; });
+
+      function emitAll(result) {
+        channelKeys.forEach(function (key) { onChannelReady(key, result); });
+      }
+
+      // Pre-flight: NeoDB 共存检测
+      if (source.key === 'neodb' && checkCoexistence()) {
+        emitAll({ status: 'coexist_skip' });
+        return;
+      }
+
+      // Pre-flight: 必要配置缺失
+      if (source.requiredConfig) {
+        var missing = source.requiredConfig.some(function (cfgKey) {
+          return !config[cfgKey];
+        });
+        if (missing) {
+          emitAll({ status: 'disabled' });
+          return;
+        }
+      }
+
+      // Pre-flight: 冷却中
+      if (isCooldownActive(source.key)) {
+        channelKeys.forEach(function (key) {
+          onChannelReady(key, { status: 'rate_limited' });
+        });
+        return;
+      }
+
+      // 检查所有 channel 缓存
+      var cached = {};
+      var allCached = true;
+      channelKeys.forEach(function (key) {
+        var hit = getCache(meta.doubanId, key, source.version || '1');
+        if (hit) {
+          cached[key] = hit;
+        } else {
+          allCached = false;
+        }
+      });
+
+      if (allCached) {
+        channelKeys.forEach(function (key) { onChannelReady(key, cached[key]); });
+        return;
+      }
+
+      // 先渲染已缓存的 channel
+      channelKeys.forEach(function (key) {
+        if (cached[key]) onChannelReady(key, cached[key]);
+      });
+
+      // 抓取未缓存的
+      source.fetch(meta, deps).then(function (results) {
+        // results: { [channelKey]: ChannelResult }
+        channelKeys.forEach(function (key) {
+          if (cached[key]) return; // 已从缓存渲染，跳过
+          var result = (results && results[key]) || { status: 'error' };
+          setCache(meta.doubanId, key, source.version || '1', result);
+          if (result.status === 'rate_limited') setCooldown(source.key);
+          onChannelReady(key, result);
+        });
+      }).catch(function (err) {
+        deps.log('fetchAll error for source', source.key, ':', err);
+        channelKeys.forEach(function (key) {
+          if (!cached[key]) onChannelReady(key, { status: 'error' });
+        });
+      });
+    });
+  }
+
+  // ============================================================
+  // init — 主入口
+  // ============================================================
+
+  function init() {
+    var meta = extractMeta();
+    if (meta.type === 'unknown' || !meta.doubanId) return;
+
+    // 排除非条目主页路径
+    var excludedPaths = ['/doulists', '/photos', '/discussion', '/reviews', '/comments', '/collections'];
+    var path = location.pathname;
+    for (var i = 0; i < excludedPaths.length; i++) {
+      if (path.indexOf(excludedPaths[i]) !== -1) return;
+    }
+
+    var config = readConfig();
+    var applicable = getApplicableSources(meta.type, config, meta);
+    if (applicable.length === 0) return;
+
+    registerMenu(sources);
+
+    var allChannels = [];
+    applicable.forEach(function (s) {
+      s.channels.forEach(function (ch) { allChannels.push(ch); });
+    });
+
+    ensureStyles();
+    evictStale();
+    createSlots(allChannels);
+    fetchAll(applicable, meta, config, function (channelKey, result) {
+      fillSlot(channelKey, result);
+    });
+
+    deps.log('Initialized for', meta.type, ':', meta.title);
+  }
+
+  // DOM 就绪后执行
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    setTimeout(init, 300);
+  }
 })();
