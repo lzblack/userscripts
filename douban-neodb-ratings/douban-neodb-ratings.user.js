@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆瓣条目 NeoDB 评分增强
 // @namespace    https://github.com/lzblack
-// @version      1.0.3
+// @version      1.0.4
 // @author       lzblack
 // @description  在豆瓣条目页（书籍、电影、音乐、游戏）上添加 NeoDB.social 的评分展示（含条目链接）
 // @match        https://book.douban.com/subject/*
@@ -524,7 +524,6 @@
       }
       .douban-thirdparty-rating .rating-row {
         display: flex;
-        justify-content: space-between;
         align-items: center;
         gap: 8px;
       }
