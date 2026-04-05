@@ -49,16 +49,21 @@
   }
 
   async function checkInterest(subjectId) {
-    const resp = await fetch(`/j/subject/${subjectId}/interest`, {
-      credentials: 'include',
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data.html) return null;
-    const match = data.html.match(
-      /<input[^>]*value="(wish|do|collect)"[^>]*checked="checked"[^>]*\/?>|<input[^>]*checked="checked"[^>]*value="(wish|do|collect)"[^>]*\/?>/
-    );
-    return match ? (match[1] || match[2]) : null;
+    try {
+      const resp = await fetch(`/j/subject/${subjectId}/interest`, {
+        credentials: 'include',
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      if (!data.html) return null;
+      const match = data.html.match(
+        /<input[^>]*value="(wish|do|collect)"[^>]*checked="checked"[^>]*\/?>|<input[^>]*checked="checked"[^>]*value="(wish|do|collect)"[^>]*\/?>/
+      );
+      return match ? (match[1] || match[2]) : null;
+    } catch (e) {
+      log('Failed to check interest for', subjectId, e);
+      return null;
+    }
   }
 
   function fetchVersionName(subjectId, worksPageHtml) {
