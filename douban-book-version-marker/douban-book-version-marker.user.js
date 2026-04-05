@@ -62,7 +62,10 @@
       if (!data.html) return null;
       const fragment = new DOMParser().parseFromString(data.html, 'text/html');
       const checked = fragment.querySelector('input[name="interest"][checked="checked"]');
-      return checked ? checked.value : null;
+      if (!checked) return null;
+      const ratingInput = fragment.querySelector('#n_rating');
+      const rating = ratingInput ? parseInt(ratingInput.value, 10) || 0 : 0;
+      return { status: checked.value, rating };
     } catch (e) {
       log('Failed to check interest for', subjectId, e);
       return null;
@@ -84,10 +87,11 @@
   async function checkAllVersions(versionIds, worksDoc) {
     const results = [];
     for (const id of versionIds) {
-      const status = await checkInterest(id);
-      if (status) {
+      const interest = await checkInterest(id);
+      if (interest) {
         results.push({
-          status,
+          status: interest.status,
+          rating: interest.rating,
           name: parseVersionName(id, worksDoc),
           url: `https://book.douban.com/subject/${id}/`,
         });
@@ -113,6 +117,9 @@
       }
       .version-marker-tip a:hover {
         text-decoration: underline;
+      }
+      .version-marker-stars {
+        color: #e09015;
       }
       .version-marker-loading {
         font-size: 12px;
@@ -158,6 +165,13 @@
       link.target = '_blank';
       link.textContent = v.name;
       line.appendChild(link);
+
+      if (v.rating > 0 && (v.status === 'collect' || v.status === 'do')) {
+        const stars = document.createElement('span');
+        stars.className = 'version-marker-stars';
+        stars.textContent = ' ' + '★'.repeat(v.rating) + '☆'.repeat(5 - v.rating);
+        line.appendChild(stars);
+      }
 
       container.appendChild(line);
     }
