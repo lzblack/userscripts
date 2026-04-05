@@ -5,6 +5,7 @@
 // @author       lzblack
 // @description  在豆瓣读书条目页提示你标记过同一作品的其他版本
 // @match        https://book.douban.com/subject/*
+// @icon         https://img3.doubanio.com/favicon.ico
 // @grant        none
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-book-version-marker/douban-book-version-marker.user.js
@@ -35,17 +36,20 @@
     const currentId = getCurrentSubjectId();
     const resp = await fetch(worksUrl, { credentials: 'include' });
     const html = await resp.text();
-    const matches = html.matchAll(/\/subject\/(\d+)\//g);
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const links = doc.querySelectorAll('a[href*="/subject/"]');
     const seen = new Set();
     const ids = [];
-    for (const m of matches) {
-      const id = m[1];
-      if (id !== currentId && !seen.has(id)) {
-        seen.add(id);
-        ids.push(id);
+    for (const link of links) {
+      const href = link.getAttribute('href') || '';
+      const m = href.match(/\/subject\/(\d+)/);
+      if (m && m[1] !== currentId && !seen.has(m[1])) {
+        seen.add(m[1]);
+        ids.push(m[1]);
       }
     }
-    return { ids, html };
+    return { ids, doc };
   }
 
   async function checkInterest(subjectId) {
@@ -56,27 +60,17 @@
       if (!resp.ok) return null;
       const data = await resp.json();
       if (!data.html) return null;
-      const match = data.html.match(
-        /<input[^>]*value="(wish|do|collect)"[^>]*checked="checked"[^>]*\/?>|<input[^>]*checked="checked"[^>]*value="(wish|do|collect)"[^>]*\/?>/
-      );
-      return match ? (match[1] || match[2]) : null;
+      const fragment = new DOMParser().parseFromString(data.html, 'text/html');
+      const checked = fragment.querySelector('input[name="interest"][checked="checked"]');
+      return checked ? checked.value : null;
     } catch (e) {
       log('Failed to check interest for', subjectId, e);
       return null;
     }
   }
 
-  function fetchVersionName(subjectId, worksPageHtml) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(worksPageHtml, 'text/html');
-    const links = doc.querySelectorAll('a');
-    for (const link of links) {
-      if (link.href && link.href.includes(`/subject/${subjectId}/`)) {
-        const text = link.textContent.trim();
-        if (text) return text;
-      }
-    }
-    // Fallback: try matching href attribute directly (DOMParser may resolve relative URLs differently)
+  function parseVersionName(subjectId, worksDoc) {
+    const links = worksDoc.querySelectorAll('a[href*="/subject/"]');
     for (const link of links) {
       const href = link.getAttribute('href') || '';
       if (href.includes(`/subject/${subjectId}/`) || href.includes(`/subject/${subjectId}`)) {
@@ -87,23 +81,19 @@
     return `版本 ${subjectId}`;
   }
 
-  async function checkAllVersions(versionIds, worksPageHtml) {
-    const results = await Promise.all(
-      versionIds.map(async (id) => {
-        const status = await checkInterest(id);
-        if (!status) return null;
-        const name = fetchVersionName(id, worksPageHtml);
-        return {
+  async function checkAllVersions(versionIds, worksDoc) {
+    const results = [];
+    for (const id of versionIds) {
+      const status = await checkInterest(id);
+      if (status) {
+        results.push({
           status,
-          name,
+          name: parseVersionName(id, worksDoc),
           url: `https://book.douban.com/subject/${id}/`,
-        };
-      })
-    );
-
-    return results
-      .filter(Boolean)
-      .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
+        });
+      }
+    }
+    return results.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   }
 
   function ensureStyles() {
@@ -133,6 +123,10 @@
     document.head.appendChild(style);
   }
 
+  function removeElement(el) {
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
   function insertLoadingTip() {
     const anchor = document.getElementById('interest_sect_level');
     if (!anchor) return null;
@@ -144,9 +138,7 @@
   }
 
   function renderTip(markedVersions, loadingEl) {
-    if (loadingEl && loadingEl.parentNode) {
-      loadingEl.parentNode.removeChild(loadingEl);
-    }
+    removeElement(loadingEl);
     if (!markedVersions || markedVersions.length === 0) return;
 
     const anchor = document.getElementById('interest_sect_level');
@@ -159,12 +151,11 @@
       const line = document.createElement('div');
 
       const label = STATUS_LABELS[v.status] || v.status;
-      const textNode = document.createTextNode(`${label}另一版本：`);
-      line.appendChild(textNode);
+      line.appendChild(document.createTextNode(`${label}另一版本：`));
 
       const link = document.createElement('a');
       link.href = v.url;
-      link.setAttribute('target', '_blank');
+      link.target = '_blank';
       link.textContent = v.name;
       line.appendChild(link);
 
@@ -176,42 +167,30 @@
 
   async function init() {
     const currentId = getCurrentSubjectId();
-    if (!currentId) {
-      log('No subject ID found, abort.');
-      return;
-    }
+    if (!currentId) return;
 
     const worksUrl = getWorksUrl();
-    if (!worksUrl) {
-      log('No works link found, skip.');
-      return;
-    }
+    if (!worksUrl) return;
 
     log('Works URL:', worksUrl);
     ensureStyles();
-
     const loadingEl = insertLoadingTip();
 
     try {
-      const { ids, html } = await fetchVersionIds(worksUrl);
+      const { ids, doc: worksDoc } = await fetchVersionIds(worksUrl);
       log('Found', ids.length, 'other version(s).');
 
       if (ids.length === 0) {
-        if (loadingEl && loadingEl.parentNode) {
-          loadingEl.parentNode.removeChild(loadingEl);
-        }
+        removeElement(loadingEl);
         return;
       }
 
-      const markedVersions = await checkAllVersions(ids, html);
+      const markedVersions = await checkAllVersions(ids, worksDoc);
       log('Marked versions:', markedVersions);
-
       renderTip(markedVersions, loadingEl);
     } catch (err) {
-      console.error('[VersionMarker] Error:', err);
-      if (loadingEl && loadingEl.parentNode) {
-        loadingEl.parentNode.removeChild(loadingEl);
-      }
+      log('Error:', err);
+      removeElement(loadingEl);
     }
   }
 
