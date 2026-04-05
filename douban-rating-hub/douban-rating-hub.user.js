@@ -578,6 +578,186 @@
   }
 
   // ============================================================
+  // Sources — 各平台评分获取定义
+  // ============================================================
+
+  // --- NeoDB ---
+  sources.push({
+    key: 'neodb',
+    label: 'NeoDB',
+    version: 1,
+    types: ['book', 'movie', 'music', 'game'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'neodb', label: 'NeoDB' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        // 分类映射：music → album
+        var categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game' };
+        var category = categoryMap[meta.type] || 'all';
+
+        // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
+        var doubanUrl = location.href.split('?')[0].split('#')[0];
+        var queries = [doubanUrl];
+        if (meta.originalTitle && meta.originalTitle !== meta.title) {
+          queries.push(meta.originalTitle);
+        }
+        if (meta.title) {
+          queries.push(meta.title);
+        }
+
+        // 匹配 NeoDB 条目详情页路径
+        var detailPathRe = /neodb\.social\/(book|movie|album|music|game|tv\/season|tv|podcast|performance)\//;
+
+        function parseDetail(doc, url) {
+          // 优先用 JSON-LD aggregateRating
+          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < scripts.length; i++) {
+            try {
+              var data = JSON.parse(scripts[i].textContent);
+              var ar = data.aggregateRating;
+              if (ar && ar.ratingValue != null) {
+                var score = parseFloat(ar.ratingValue);
+                var count = parseInt(ar.ratingCount, 10) || 0;
+                if (isNaN(score)) continue;
+                return { found: true, hasRating: count > 0, score: score, count: count, url: url };
+              }
+            } catch (e) { /* skip */ }
+          }
+          // 回退：DOM 结构解析
+          var displayBlock =
+            doc.querySelector('#item-rating .display') ||
+            doc.querySelector('.rating .display') ||
+            doc.querySelector('.display');
+          var undisplayEl = doc.querySelector('.undisplay');
+          if (undisplayEl && !displayBlock) {
+            return { found: true, hasRating: false, url: url };
+          }
+          // 尝试找评分数字
+          var ratingEl =
+            doc.querySelector('.rating-num') ||
+            doc.querySelector('[itemprop="ratingValue"]');
+          if (!ratingEl && displayBlock) {
+            ratingEl = displayBlock.querySelector('hgroup h3') || displayBlock.querySelector('h3');
+          }
+          if (!ratingEl) {
+            ratingEl = Array.from(doc.querySelectorAll('h1,h2,h3,span,strong')).find(function (el) {
+              return /[\d.]+\s*\/\s*10/.test(el.textContent);
+            });
+          }
+          if (!ratingEl) return { found: true, hasRating: false, url: url };
+          var ratingMatch = ratingEl.textContent.match(/[\d.]+/);
+          if (!ratingMatch) return { found: true, hasRating: false, url: url };
+          var score = parseFloat(ratingMatch[0]);
+          // 评分人数
+          var countEl =
+            doc.querySelector('.rating-people') ||
+            doc.querySelector('[itemprop="ratingCount"]');
+          if (!countEl && displayBlock) {
+            countEl = Array.from(displayBlock.querySelectorAll('p,span,small')).find(function (el) {
+              return /\d+\s*(个评分|人评分|ratings?)/i.test(el.textContent);
+            });
+          }
+          var count = 0;
+          if (countEl) {
+            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            if (cm) count = parseInt(cm[1], 10);
+          }
+          return { found: true, hasRating: count > 0, score: score, count: count, url: url };
+        }
+
+        function buildResult(parsed, matchedBy, confidence) {
+          var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+          if (!parsed || !parsed.found) {
+            return { neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } };
+          }
+          if (!parsed.hasRating) {
+            return { neodb: { channelKey: 'neodb', status: 'no_rating', url: parsed.url } };
+          }
+          return {
+            neodb: {
+              channelKey: 'neodb',
+              status: 'success',
+              score: parsed.score,
+              scoreMax: 10,
+              displayValue: parsed.score.toFixed(1) + '/10',
+              count: parsed.count,
+              countText: parsed.count.toLocaleString(),
+              url: parsed.url,
+              matchedBy: matchedBy,
+              matchConfidence: confidence,
+              externalId: parsed.url,
+            },
+          };
+        }
+
+        function fetchDetail(url, matchedBy, confidence, onSuccess, onFail) {
+          deps.request(url).then(function (resp) {
+            if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
+            var doc = deps.parseHTML(resp.responseText);
+            var parsed = parseDetail(doc, resp.finalUrl || url);
+            onSuccess(parsed, matchedBy, confidence);
+          }).catch(onFail);
+        }
+
+        function tryQuery(queryIndex) {
+          if (queryIndex >= queries.length) {
+            var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+            resolve({ neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } });
+            return;
+          }
+          var query = queries[queryIndex];
+          var isUrlQuery = /^https?:\/\//.test(query);
+          var matchedBy = isUrlQuery ? 'douban_url' : 'title';
+          var confidence = isUrlQuery ? 'exact' : 'fuzzy';
+          var searchUrl = 'https://neodb.social/search?' + new URLSearchParams({ q: query, category: category }).toString();
+
+          deps.request(searchUrl).then(function (resp) {
+            if (resp.status < 200 || resp.status >= 300) {
+              tryQuery(queryIndex + 1);
+              return;
+            }
+            var finalUrl = resp.finalUrl || searchUrl;
+            // 情况一：搜索直接重定向到详情页
+            if (detailPathRe.test(finalUrl)) {
+              var doc = deps.parseHTML(resp.responseText);
+              var parsed = parseDetail(doc, finalUrl);
+              if (parsed && parsed.found) {
+                resolve(buildResult(parsed, matchedBy, confidence));
+              } else {
+                tryQuery(queryIndex + 1);
+              }
+              return;
+            }
+            // 情况二：搜索列表页，找第一个结果卡片
+            var doc = deps.parseHTML(resp.responseText);
+            var card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
+            if (!card) { tryQuery(queryIndex + 1); return; }
+            var linkEl = card.querySelector('.title a') || card.querySelector('a');
+            if (!linkEl) { tryQuery(queryIndex + 1); return; }
+            var href = linkEl.getAttribute('href') || '';
+            var detailUrl = href.startsWith('http') ? href : 'https://neodb.social' + href;
+            fetchDetail(
+              detailUrl,
+              matchedBy,
+              confidence,
+              function (parsed, mb, conf) {
+                if (parsed && parsed.found) {
+                  resolve(buildResult(parsed, mb, conf));
+                } else {
+                  tryQuery(queryIndex + 1);
+                }
+              },
+              function () { tryQuery(queryIndex + 1); }
+            );
+          }).catch(function () { tryQuery(queryIndex + 1); });
+        }
+
+        tryQuery(0);
+      });
+    },
+  });
+
+  // ============================================================
   // Scheduler — 并发抓取、缓存、限流、共存检测
   // ============================================================
 
