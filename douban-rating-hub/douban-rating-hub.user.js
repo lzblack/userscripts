@@ -1293,6 +1293,310 @@
     },
   });
 
+  // --- Goodreads ---
+  sources.push({
+    key: 'goodreads', label: 'Goodreads', version: 1,
+    types: ['book'], requiredConfig: null,
+    channels: [{ channelKey: 'goodreads', label: 'Goodreads' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        // Query cascade: ISBN → originalTitle → title
+        var queries = [];
+        if (meta.isbn) queries.push(meta.isbn);
+        if (meta.originalTitle && meta.originalTitle !== meta.title) queries.push(meta.originalTitle);
+        if (meta.title) queries.push(meta.title);
+        if (!queries.length) {
+          resolve({ goodreads: { channelKey: 'goodreads', status: 'no_match', url: 'https://www.goodreads.com/' } });
+          return;
+        }
+
+        var detailPathRe = /goodreads\.com\/book\/show\//;
+
+        function noMatch() {
+          var url = 'https://www.goodreads.com/search?q=' + encodeURIComponent(queries[0]);
+          resolve({ goodreads: { channelKey: 'goodreads', status: 'no_match', url: url } });
+        }
+
+        function parseDetail(doc, url) {
+          var ratingEl = doc.querySelector('.RatingStatistics__rating');
+          var score = ratingEl ? parseFloat(ratingEl.textContent.trim()) : NaN;
+          if (isNaN(score)) return null;
+
+          var countEl = doc.querySelector('[data-testid="ratingsCount"]');
+          var count = 0;
+          if (countEl) {
+            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            if (cm) count = parseInt(cm[1], 10);
+          }
+          return { score: score, count: count, url: url };
+        }
+
+        function buildSuccess(parsed, matchedBy, confidence) {
+          resolve({
+            goodreads: {
+              channelKey: 'goodreads',
+              status: 'success',
+              score: parsed.score,
+              scoreMax: 5,
+              displayValue: parsed.score.toFixed(2) + '/5',
+              count: parsed.count || null,
+              countText: parsed.count ? parsed.count.toLocaleString() : null,
+              url: parsed.url,
+              matchedBy: matchedBy,
+              matchConfidence: confidence,
+              externalId: parsed.url,
+            },
+          });
+        }
+
+        function tryQuery(queryIndex) {
+          if (queryIndex >= queries.length) { noMatch(); return; }
+          var query = queries[queryIndex];
+          var isIsbn = queryIndex === 0 && !!meta.isbn;
+          var matchedBy = isIsbn ? 'isbn' : 'title';
+          var confidence = isIsbn ? 'exact' : 'fuzzy';
+          var searchUrl = 'https://www.goodreads.com/search?q=' + encodeURIComponent(query);
+
+          deps.request(searchUrl).then(function (resp) {
+            if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
+            var finalUrl = resp.finalUrl || searchUrl;
+            // If search redirected directly to a book detail page
+            if (detailPathRe.test(finalUrl)) {
+              var doc = deps.parseHTML(resp.responseText);
+              var parsed = parseDetail(doc, finalUrl);
+              if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
+              else { tryQuery(queryIndex + 1); }
+              return;
+            }
+            // Search results page — find first bookTitle link
+            var doc = deps.parseHTML(resp.responseText);
+            var linkEl = doc.querySelector('a.bookTitle');
+            if (!linkEl) { tryQuery(queryIndex + 1); return; }
+            var href = linkEl.getAttribute('href') || '';
+            var detailUrl = href.startsWith('http') ? href : 'https://www.goodreads.com' + href;
+            deps.request(detailUrl).then(function (detailResp) {
+              if (detailResp.status < 200 || detailResp.status >= 300) { tryQuery(queryIndex + 1); return; }
+              var detailDoc = deps.parseHTML(detailResp.responseText);
+              var parsed = parseDetail(detailDoc, detailResp.finalUrl || detailUrl);
+              if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
+              else { tryQuery(queryIndex + 1); }
+            }).catch(function () { tryQuery(queryIndex + 1); });
+          }).catch(function () { tryQuery(queryIndex + 1); });
+        }
+
+        tryQuery(0);
+      });
+    },
+  });
+
+  // --- Amazon ---
+  sources.push({
+    key: 'amazon', label: 'Amazon', version: 1,
+    types: ['book'], requiredConfig: null,
+    channels: [{ channelKey: 'amazon', label: 'Amazon' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        // Query cascade: ISBN → originalTitle+creator → title+creator
+        var creator = meta.creator || '';
+        var queries = [];
+        if (meta.isbn) queries.push(meta.isbn);
+        if (meta.originalTitle && meta.originalTitle !== meta.title) {
+          queries.push(creator ? meta.originalTitle + ' ' + creator : meta.originalTitle);
+        }
+        if (meta.title) {
+          queries.push(creator ? meta.title + ' ' + creator : meta.title);
+        }
+        if (!queries.length) {
+          resolve({ amazon: { channelKey: 'amazon', status: 'no_match', url: 'https://www.amazon.com/' } });
+          return;
+        }
+
+        var dpPathRe = /amazon\.com(\/[^/]+)?\/dp\//;
+
+        function noMatch() {
+          var url = 'https://www.amazon.com/s?k=' + encodeURIComponent(queries[0]);
+          resolve({ amazon: { channelKey: 'amazon', status: 'no_match', url: url } });
+        }
+
+        function parseDetail(doc, url) {
+          // Try [data-hook="rating-out-of-text"] first, fall back to .a-icon-alt
+          var ratingEl = doc.querySelector('[data-hook="rating-out-of-text"]');
+          if (!ratingEl) {
+            var candidates = doc.querySelectorAll('.a-icon-alt');
+            for (var i = 0; i < candidates.length; i++) {
+              if (/out of 5 stars/i.test(candidates[i].textContent)) {
+                ratingEl = candidates[i];
+                break;
+              }
+            }
+          }
+          if (!ratingEl) return null;
+          var ratingMatch = ratingEl.textContent.match(/([\d.]+)/);
+          if (!ratingMatch) return null;
+          var score = parseFloat(ratingMatch[1]);
+          if (isNaN(score)) return null;
+
+          var countEl = doc.querySelector('#acrCustomerReviewText') ||
+                        doc.querySelector('[data-hook="total-review-count"]');
+          var count = 0;
+          if (countEl) {
+            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            if (cm) count = parseInt(cm[1], 10);
+          }
+          return { score: score, count: count, url: url };
+        }
+
+        function buildSuccess(parsed, matchedBy, confidence) {
+          resolve({
+            amazon: {
+              channelKey: 'amazon',
+              status: 'success',
+              score: parsed.score,
+              scoreMax: 5,
+              displayValue: parsed.score.toFixed(1) + '/5',
+              count: parsed.count || null,
+              countText: parsed.count ? parsed.count.toLocaleString() : null,
+              url: parsed.url,
+              matchedBy: matchedBy,
+              matchConfidence: confidence,
+              externalId: parsed.url,
+            },
+          });
+        }
+
+        function fetchDetail(url, matchedBy, confidence, onFail) {
+          deps.request(url, { headers: { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } })
+            .then(function (resp) {
+              if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
+              var doc = deps.parseHTML(resp.responseText);
+              var parsed = parseDetail(doc, resp.finalUrl || url);
+              if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
+              else { onFail(); }
+            }).catch(onFail);
+        }
+
+        function tryQuery(queryIndex) {
+          if (queryIndex >= queries.length) { noMatch(); return; }
+          var query = queries[queryIndex];
+          var isIsbn = queryIndex === 0 && !!meta.isbn;
+          var matchedBy = isIsbn ? 'isbn' : 'title';
+          var confidence = isIsbn ? 'exact' : 'fuzzy';
+          var searchUrl = 'https://www.amazon.com/s?k=' + encodeURIComponent(query);
+
+          deps.request(searchUrl, { headers: { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } })
+            .then(function (resp) {
+              if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
+              var finalUrl = resp.finalUrl || searchUrl;
+              // If search landed directly on a product detail page
+              if (dpPathRe.test(finalUrl)) {
+                var doc = deps.parseHTML(resp.responseText);
+                var parsed = parseDetail(doc, finalUrl);
+                if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
+                else { tryQuery(queryIndex + 1); }
+                return;
+              }
+              // Search results — find first result link
+              var doc = deps.parseHTML(resp.responseText);
+              var resultEl = doc.querySelector('[data-component-type="s-search-result"]');
+              if (!resultEl) { tryQuery(queryIndex + 1); return; }
+              var linkEl = resultEl.querySelector('h2 a') || resultEl.querySelector('a[href*="/dp/"]');
+              if (!linkEl) { tryQuery(queryIndex + 1); return; }
+              var href = linkEl.getAttribute('href') || '';
+              var detailUrl = href.startsWith('http') ? href : 'https://www.amazon.com' + href;
+              fetchDetail(detailUrl, matchedBy, confidence, function () { tryQuery(queryIndex + 1); });
+            }).catch(function () { tryQuery(queryIndex + 1); });
+        }
+
+        tryQuery(0);
+      });
+    },
+  });
+
+  // --- 微信读书 ---
+  sources.push({
+    key: 'weread', label: '微信读书', version: 1,
+    types: ['book'], requiredConfig: null,
+    channels: [{ channelKey: 'weread', label: '微信读书' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var title = meta.title || '';
+        var searchPageUrl = 'https://weread.qq.com/web/search/books?keyword=' + encodeURIComponent(title);
+
+        function noMatch() {
+          resolve({ weread: { channelKey: 'weread', status: 'no_match', url: searchPageUrl } });
+        }
+
+        if (!title) { noMatch(); return; }
+
+        // Normalize: lowercase, keep CJK and word chars only
+        function normalizeTitle(t) {
+          return t.toLowerCase().replace(/[^\w\u4e00-\u9fff\u3040-\u30ff]/g, '');
+        }
+
+        var normalizedQuery = normalizeTitle(title);
+        var apiUrl = 'https://weread.qq.com/web/search/global?keyword=' + encodeURIComponent(title);
+
+        deps.request(apiUrl, {
+          headers: { 'Referer': 'https://weread.qq.com/', 'Accept': 'application/json' },
+        }).then(function (resp) {
+          if (resp.status < 200 || resp.status >= 300) { noMatch(); return; }
+          var data;
+          try { data = JSON.parse(resp.responseText); } catch (e) { noMatch(); return; }
+
+          var books = (data && data.books) ? data.books : [];
+          if (!books.length) { noMatch(); return; }
+
+          // Match: exact → partial → first result
+          var matched = null;
+          for (var i = 0; i < books.length; i++) {
+            var bookInfo = books[i].bookInfo || books[i];
+            var bookTitle = normalizeTitle(bookInfo.title || '');
+            if (bookTitle === normalizedQuery) { matched = bookInfo; break; }
+          }
+          if (!matched) {
+            for (var j = 0; j < books.length; j++) {
+              var bi = books[j].bookInfo || books[j];
+              var bt = normalizeTitle(bi.title || '');
+              if (bt.indexOf(normalizedQuery) !== -1 || normalizedQuery.indexOf(bt) !== -1) {
+                matched = bi;
+                break;
+              }
+            }
+          }
+          if (!matched) {
+            matched = books[0].bookInfo || books[0];
+          }
+
+          var rawRating = matched.newRating;
+          if (rawRating == null || rawRating === 0) {
+            resolve({ weread: { channelKey: 'weread', status: 'no_rating', url: searchPageUrl } });
+            return;
+          }
+
+          // newRating is on a 0–1000 scale → percentage display
+          var percentage = rawRating / 10;
+          var count = matched.newRatingCount || 0;
+
+          resolve({
+            weread: {
+              channelKey: 'weread',
+              status: 'success',
+              score: percentage,
+              scoreMax: 100,
+              displayValue: percentage.toFixed(1) + '%',
+              count: count || null,
+              countText: count ? count.toLocaleString() + '人点评' : null,
+              url: searchPageUrl,
+              matchedBy: 'title',
+              matchConfidence: 'fuzzy',
+              externalId: matched.bookId ? String(matched.bookId) : null,
+            },
+          });
+        }).catch(function () { noMatch(); });
+      });
+    },
+  });
+
   // ============================================================
   // Scheduler — 并发抓取、缓存、限流、共存检测
   // ============================================================
