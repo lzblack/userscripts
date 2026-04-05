@@ -507,7 +507,7 @@
       if (result.count) {
         var countEl = document.createElement('span');
         countEl.className = 'rating-hub-count';
-        countEl.textContent = '(' + result.count + ')';
+        countEl.textContent = '(' + (result.countText || result.count.toLocaleString()) + ')';
         row.appendChild(countEl);
       }
 
@@ -601,6 +601,12 @@
             resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
             return;
           }
+          // IMDB 使用 AWS WAF 防护，未通过验证时返回 202 + 短小的 JS 挑战页
+          if (resp.status === 202 || resp.responseText.length < 10000 || resp.responseText.indexOf('AwsWafIntegration') !== -1) {
+            deps.log('IMDB WAF challenge detected, cannot scrape');
+            resolve({ imdb: { channelKey: 'imdb', status: 'error', error: 'WAF challenge', url: itemUrl } });
+            return;
+          }
           var doc = deps.parseHTML(resp.responseText);
           // Parse LD+JSON for aggregateRating
           var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
@@ -610,7 +616,7 @@
               var ar = data.aggregateRating;
               if (ar && ar.ratingValue != null) {
                 var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount, 10) || 0;
+                var count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
                 if (isNaN(score)) continue;
                 if (count === 0) {
                   resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
@@ -809,7 +815,8 @@
           }
           try {
             var data = JSON.parse(resp.responseText);
-            var score = data && data.criticScoreSummary && data.criticScoreSummary.score;
+            var item = data && data.data && data.data.item;
+            var score = item && item.criticScoreSummary && item.criticScoreSummary.score;
             if (score == null || isNaN(Number(score))) {
               resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/movie/' + slug + '/' } });
               return;
@@ -866,7 +873,7 @@
               var ar = data.aggregateRating;
               if (ar && ar.ratingValue != null) {
                 var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount, 10) || 0;
+                var count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
                 if (!isNaN(score)) {
                   return { score: score, count: count, url: pageUrl };
                 }
@@ -971,7 +978,8 @@
         function buildSuccess(movie, matchedBy, matchConfidence) {
           var score = parseFloat(movie.vote_average);
           var count = parseInt(movie.vote_count, 10) || 0;
-          var movieUrl = 'https://www.themoviedb.org/movie/' + movie.id;
+          var mediaType = movie.media_type === 'tv' || movie.first_air_date ? 'tv' : 'movie';
+          var movieUrl = 'https://www.themoviedb.org/' + mediaType + '/' + movie.id;
           if (isNaN(score) || count === 0) {
             resolve({ tmdb: { channelKey: 'tmdb', status: 'no_rating', url: movieUrl } });
             return;
@@ -1022,7 +1030,7 @@
             '?api_key=' + encodeURIComponent(apiKey) + '&external_source=imdb_id';
           deps.request(findUrl).then(function (resp) {
             handleResp(resp, function (data) {
-              return data.movie_results && data.movie_results[0];
+              return (data.movie_results && data.movie_results[0]) || (data.tv_results && data.tv_results[0]);
             }, 'imdb_id', 'exact');
           }).catch(function () { noMatch(); });
         } else {
@@ -1459,9 +1467,9 @@
               var ar = data.aggregateRating;
               if (ar && ar.ratingValue != null) {
                 var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount, 10) || 0;
+                var count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
                 if (isNaN(score)) continue;
-                return { found: true, hasRating: count > 0, score: score, count: count, url: url };
+                return { found: true, hasRating: score > 0, score: score, count: count, url: url };
               }
             } catch (e) { /* skip */ }
           }
@@ -1629,7 +1637,9 @@
       var channelKeys = source.channels.map(function (ch) { return ch.channelKey; });
 
       function emitAll(result) {
-        channelKeys.forEach(function (key) { onChannelReady(key, result); });
+        channelKeys.forEach(function (key) {
+          onChannelReady(key, Object.assign({ channelKey: key }, result));
+        });
       }
 
       // Pre-flight: NeoDB 共存检测
