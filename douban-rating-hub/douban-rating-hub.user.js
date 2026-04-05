@@ -1126,6 +1126,173 @@
     },
   });
 
+  // --- TMDB ---
+  sources.push({
+    key: 'tmdb', label: 'TMDB', version: 1,
+    types: ['movie'],
+    requiredConfig: ['tmdbApiKey'],
+    channels: [{ channelKey: 'tmdb', label: 'TMDB' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var config = readConfig();
+        var apiKey = config.tmdbApiKey;
+        var searchUrl = 'https://www.themoviedb.org/search?query=' + encodeURIComponent(meta.title || '');
+
+        function noMatch() {
+          resolve({ tmdb: { channelKey: 'tmdb', status: 'no_match', url: searchUrl } });
+        }
+
+        function buildSuccess(movie, matchedBy, matchConfidence) {
+          var score = parseFloat(movie.vote_average);
+          var count = parseInt(movie.vote_count, 10) || 0;
+          var movieUrl = 'https://www.themoviedb.org/movie/' + movie.id;
+          if (isNaN(score) || count === 0) {
+            resolve({ tmdb: { channelKey: 'tmdb', status: 'no_rating', url: movieUrl } });
+            return;
+          }
+          resolve({
+            tmdb: {
+              channelKey: 'tmdb',
+              status: 'success',
+              score: score,
+              scoreMax: 10,
+              displayValue: score.toFixed(1) + '/10',
+              count: count,
+              countText: count.toLocaleString(),
+              url: movieUrl,
+              matchedBy: matchedBy,
+              matchConfidence: matchConfidence,
+              externalId: String(movie.id),
+            },
+          });
+        }
+
+        function handleResp(resp, extractMovie, matchedBy, matchConfidence) {
+          if (resp.status === 401 || resp.status === 403) {
+            resolve({ tmdb: { channelKey: 'tmdb', status: 'error', url: searchUrl } });
+            return;
+          }
+          if (resp.status === 429) {
+            resolve({ tmdb: { channelKey: 'tmdb', status: 'rate_limited', url: searchUrl } });
+            return;
+          }
+          if (resp.status < 200 || resp.status >= 300) {
+            noMatch();
+            return;
+          }
+          try {
+            var data = JSON.parse(resp.responseText);
+            var movie = extractMovie(data);
+            if (!movie) { noMatch(); return; }
+            buildSuccess(movie, matchedBy, matchConfidence);
+          } catch (e) {
+            noMatch();
+          }
+        }
+
+        if (meta.imdbId) {
+          // Prefer IMDB ID lookup via /find
+          var findUrl = 'https://api.themoviedb.org/3/find/' + meta.imdbId +
+            '?api_key=' + encodeURIComponent(apiKey) + '&external_source=imdb_id';
+          deps.request(findUrl).then(function (resp) {
+            handleResp(resp, function (data) {
+              return data.movie_results && data.movie_results[0];
+            }, 'imdb_id', 'exact');
+          }).catch(function () { noMatch(); });
+        } else {
+          // Fallback to title search
+          var year = meta.year ? '&year=' + encodeURIComponent(meta.year) : '';
+          var queryUrl = 'https://api.themoviedb.org/3/search/movie?api_key=' +
+            encodeURIComponent(apiKey) + '&query=' + encodeURIComponent(meta.title || '') + year;
+          deps.request(queryUrl).then(function (resp) {
+            handleResp(resp, function (data) {
+              return data.results && data.results[0];
+            }, 'title', 'fuzzy');
+          }).catch(function () { noMatch(); });
+        }
+      });
+    },
+  });
+
+  // --- AnyDB (AniDB + Bangumi + MAL) ---
+  sources.push({
+    key: 'anydb', label: 'AnyDB', version: 1,
+    types: ['movie'],
+    requiredConfig: null,
+    channels: [
+      { channelKey: 'anidb', label: 'AniDB' },
+      { channelKey: 'bangumi', label: 'Bangumi' },
+      { channelKey: 'mal', label: 'MAL' },
+    ],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var apiUrl = 'https://anydb.depar.cc/anime/query?_cf_cache=1&douban=' + encodeURIComponent(meta.doubanId);
+
+        function errorAll() {
+          resolve({
+            anidb: { channelKey: 'anidb', status: 'error' },
+            bangumi: { channelKey: 'bangumi', status: 'error' },
+            mal: { channelKey: 'mal', status: 'error' },
+          });
+        }
+
+        function buildChannel(channelKey, matched, pageUrl) {
+          if (!matched) {
+            return { channelKey: channelKey, status: 'no_match', url: pageUrl };
+          }
+          var score = parseFloat(matched.score != null ? matched.score : matched.rating);
+          if (isNaN(score) || score <= 0) {
+            return { channelKey: channelKey, status: 'no_rating', url: pageUrl };
+          }
+          return {
+            channelKey: channelKey,
+            status: 'success',
+            score: score,
+            scoreMax: 10,
+            displayValue: score.toFixed(2) + '/10',
+            count: null,
+            countText: null,
+            url: pageUrl,
+            matchedBy: 'douban_id',
+            matchConfidence: 'exact',
+            externalId: String(matched.id),
+          };
+        }
+
+        deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
+          if (resp.status < 200 || resp.status >= 300) {
+            errorAll();
+            return;
+          }
+          try {
+            var data = JSON.parse(resp.responseText);
+            if (!data.success) {
+              resolve({
+                anidb: { channelKey: 'anidb', status: 'no_match' },
+                bangumi: { channelKey: 'bangumi', status: 'no_match' },
+                mal: { channelKey: 'mal', status: 'no_match' },
+              });
+              return;
+            }
+            var m = data.matched || {};
+            resolve({
+              anidb: buildChannel('anidb', m.anidb,
+                m.anidb ? 'https://anidb.net/anime/' + m.anidb.id : undefined),
+              bangumi: buildChannel('bangumi', m.bgm,
+                m.bgm ? 'https://bgm.tv/subject/' + m.bgm.id : undefined),
+              mal: buildChannel('mal', m.mal,
+                m.mal ? 'https://myanimelist.net/anime/' + m.mal.id : undefined),
+            });
+          } catch (e) {
+            errorAll();
+          }
+        }).catch(function () {
+          errorAll();
+        });
+      });
+    },
+  });
+
   // ============================================================
   // Scheduler — 并发抓取、缓存、限流、共存检测
   // ============================================================
