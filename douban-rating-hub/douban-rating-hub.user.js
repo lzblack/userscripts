@@ -930,6 +930,202 @@
     },
   });
 
+  // --- Metacritic ---
+  sources.push({
+    key: 'metacritic', label: 'Metacritic', version: 1,
+    types: ['movie'], requiredConfig: null,
+    channels: [{ channelKey: 'metacritic', label: 'Metacritic' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var titleForSlug = meta.originalTitle || meta.title || '';
+        // Build slug: lowercase, remove non-alphanumeric except spaces, replace spaces with hyphens
+        var slug = titleForSlug
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]/g, '')
+          .trim()
+          .replace(/\s+/g, '-');
+
+        var searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
+        var matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+
+        if (!slug) {
+          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+          return;
+        }
+
+        var apiUrl = 'https://backend.metacritic.com/movies/metacritic/' + slug + '/web';
+        deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
+          if (resp.status === 404) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+            return;
+          }
+          if (resp.status < 200 || resp.status >= 300) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+            return;
+          }
+          try {
+            var data = JSON.parse(resp.responseText);
+            var score = data && data.criticScoreSummary && data.criticScoreSummary.score;
+            if (score == null || isNaN(Number(score))) {
+              resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/movie/' + slug + '/' } });
+              return;
+            }
+            score = Number(score);
+            resolve({
+              metacritic: {
+                channelKey: 'metacritic',
+                status: 'success',
+                score: score,
+                scoreMax: 100,
+                displayValue: score + '/100',
+                count: null,
+                countText: null,
+                url: 'https://www.metacritic.com/movie/' + slug + '/',
+                matchedBy: 'title_slug',
+                matchConfidence: matchConfidence,
+                externalId: slug,
+              },
+            });
+          } catch (e) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+          }
+        }).catch(function () {
+          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+        });
+      });
+    },
+  });
+
+  // --- Rotten Tomatoes ---
+  sources.push({
+    key: 'rottentomatoes', label: 'Rotten Tomatoes', version: 1,
+    types: ['movie'], requiredConfig: null,
+    channels: [
+      { channelKey: 'rt_critics', label: 'RT Critics' },
+      { channelKey: 'rt_audience', label: 'RT Audience' },
+    ],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var titleForSearch = meta.originalTitle || meta.title || '';
+        var searchUrl = 'https://www.rottentomatoes.com/search?search=' + encodeURIComponent(titleForSearch);
+        var matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+
+        function noMatchBoth() {
+          resolve({
+            rt_critics: { channelKey: 'rt_critics', status: 'no_match', url: searchUrl },
+            rt_audience: { channelKey: 'rt_audience', status: 'no_match', url: searchUrl },
+          });
+        }
+
+        function buildResults(criticsScore, audienceScore, movieUrl) {
+          var results = {};
+          if (criticsScore != null && !isNaN(criticsScore)) {
+            results.rt_critics = {
+              channelKey: 'rt_critics',
+              status: 'success',
+              score: criticsScore,
+              scoreMax: 100,
+              displayValue: criticsScore + '%',
+              count: null,
+              countText: null,
+              url: movieUrl,
+              matchedBy: 'english_title',
+              matchConfidence: matchConfidence,
+              externalId: movieUrl,
+            };
+          } else {
+            results.rt_critics = { channelKey: 'rt_critics', status: 'no_rating', url: movieUrl };
+          }
+          if (audienceScore != null && !isNaN(audienceScore)) {
+            results.rt_audience = {
+              channelKey: 'rt_audience',
+              status: 'success',
+              score: audienceScore,
+              scoreMax: 100,
+              displayValue: audienceScore + '%',
+              count: null,
+              countText: null,
+              url: movieUrl,
+              matchedBy: 'english_title',
+              matchConfidence: matchConfidence,
+              externalId: movieUrl,
+            };
+          } else {
+            results.rt_audience = { channelKey: 'rt_audience', status: 'no_rating', url: movieUrl };
+          }
+          return results;
+        }
+
+        if (!titleForSearch) {
+          noMatchBoth();
+          return;
+        }
+
+        // Step 1: Search RT to find movie path
+        deps.request(searchUrl).then(function (searchResp) {
+          if (searchResp.status < 200 || searchResp.status >= 300) {
+            noMatchBoth();
+            return;
+          }
+          var searchDoc = deps.parseHTML(searchResp.responseText);
+          var linkEl = searchDoc.querySelector('search-page-media-row a[data-qa="info-name"]');
+          if (!linkEl) {
+            noMatchBoth();
+            return;
+          }
+          var moviePath = linkEl.getAttribute('href') || '';
+          if (!moviePath) {
+            noMatchBoth();
+            return;
+          }
+          var movieUrl = moviePath.startsWith('http') ? moviePath : 'https://www.rottentomatoes.com' + moviePath;
+
+          // Step 2: Fetch movie detail page and extract scores
+          deps.request(movieUrl).then(function (movieResp) {
+            if (movieResp.status < 200 || movieResp.status >= 300) {
+              noMatchBoth();
+              return;
+            }
+            var html = movieResp.responseText;
+            var criticsScore = null;
+            var audienceScore = null;
+
+            // Method A: JSON in <script type="application/json"> tags
+            var criticsMatch = html.match(/"criticsScore"\s*:\s*(\d+)/);
+            var audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
+            if (criticsMatch) criticsScore = parseInt(criticsMatch[1], 10);
+            if (audienceMatch) audienceScore = parseInt(audienceMatch[1], 10);
+
+            // Method B: DOM selectors fallback
+            if (criticsScore == null || audienceScore == null) {
+              var movieDoc = deps.parseHTML(html);
+              if (criticsScore == null) {
+                var csEl = movieDoc.querySelector('rt-text[slot="critics-score"]');
+                if (csEl) {
+                  var parsed = parseInt(csEl.textContent, 10);
+                  if (!isNaN(parsed)) criticsScore = parsed;
+                }
+              }
+              if (audienceScore == null) {
+                var asEl = movieDoc.querySelector('rt-text[slot="audience-score"]');
+                if (asEl) {
+                  var parsedA = parseInt(asEl.textContent, 10);
+                  if (!isNaN(parsedA)) audienceScore = parsedA;
+                }
+              }
+            }
+
+            resolve(buildResults(criticsScore, audienceScore, movieUrl));
+          }).catch(function () {
+            noMatchBoth();
+          });
+        }).catch(function () {
+          noMatchBoth();
+        });
+      });
+    },
+  });
+
   // ============================================================
   // Scheduler — 并发抓取、缓存、限流、共存检测
   // ============================================================
