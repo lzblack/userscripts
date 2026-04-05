@@ -501,7 +501,7 @@
 
       var scoreEl = document.createElement('span');
       scoreEl.className = 'rating-hub-score';
-      scoreEl.textContent = result.score;
+      scoreEl.textContent = result.displayValue || result.score;
       row.appendChild(scoreEl);
 
       if (result.count) {
@@ -512,13 +512,15 @@
       }
 
     } else if (status === 'no_match' || status === 'no_rating') {
-      var a = document.createElement('a');
-      a.className = 'rating-hub-label';
-      a.href = result.url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = label.textContent;
-      row.replaceChild(a, label);
+      if (result.url) {
+        var a = document.createElement('a');
+        a.className = 'rating-hub-label';
+        a.href = result.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = label.textContent;
+        row.replaceChild(a, label);
+      }
 
       var statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
