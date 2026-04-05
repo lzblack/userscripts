@@ -757,6 +757,179 @@
     },
   });
 
+  // --- IMDB ---
+  sources.push({
+    key: 'imdb', label: 'IMDB', version: 1,
+    types: ['movie'], requiredConfig: null,
+    channels: [{ channelKey: 'imdb', label: 'IMDB' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var searchUrl = 'https://www.imdb.com/search/title/?title=' + encodeURIComponent(meta.title || '');
+        if (!meta.imdbId) {
+          resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: searchUrl } });
+          return;
+        }
+        var itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
+        deps.request(itemUrl).then(function (resp) {
+          if (resp.status < 200 || resp.status >= 300) {
+            resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
+            return;
+          }
+          var doc = deps.parseHTML(resp.responseText);
+          // Parse LD+JSON for aggregateRating
+          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < scripts.length; i++) {
+            try {
+              var data = JSON.parse(scripts[i].textContent);
+              var ar = data.aggregateRating;
+              if (ar && ar.ratingValue != null) {
+                var score = parseFloat(ar.ratingValue);
+                var count = parseInt(ar.ratingCount, 10) || 0;
+                if (isNaN(score)) continue;
+                if (count === 0) {
+                  resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
+                  return;
+                }
+                resolve({
+                  imdb: {
+                    channelKey: 'imdb',
+                    status: 'success',
+                    score: score,
+                    scoreMax: 10,
+                    displayValue: score.toFixed(1) + '/10',
+                    count: count,
+                    countText: count.toLocaleString(),
+                    url: itemUrl,
+                    matchedBy: 'imdb_id',
+                    matchConfidence: 'exact',
+                    externalId: meta.imdbId,
+                  },
+                });
+                return;
+              }
+            } catch (e) { /* skip */ }
+          }
+          // No aggregateRating found
+          resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
+        }).catch(function () {
+          resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
+        });
+      });
+    },
+  });
+
+  // --- Letterboxd ---
+  sources.push({
+    key: 'letterboxd', label: 'Letterboxd', version: 1,
+    types: ['movie'], requiredConfig: null,
+    channels: [{ channelKey: 'letterboxd', label: 'Letterboxd' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
+        if (!meta.imdbId) {
+          resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
+          return;
+        }
+
+        var csiUrl = 'https://letterboxd.com/csi/film/imdb/' + meta.imdbId + '/ratings-summary/';
+        var fallbackUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
+
+        function parseFromPage(html, pageUrl) {
+          var doc = deps.parseHTML(html);
+          // Try LD+JSON first
+          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < scripts.length; i++) {
+            try {
+              var data = JSON.parse(scripts[i].textContent);
+              var ar = data.aggregateRating;
+              if (ar && ar.ratingValue != null) {
+                var score = parseFloat(ar.ratingValue);
+                var count = parseInt(ar.ratingCount, 10) || 0;
+                if (!isNaN(score)) {
+                  return { score: score, count: count, url: pageUrl };
+                }
+              }
+            } catch (e) { /* skip */ }
+          }
+          // Regex fallback
+          var rvMatch = html.match(/"ratingValue"\s*:\s*([\d.]+)/);
+          var rcMatch = html.match(/"ratingCount"\s*:\s*([\d]+)/);
+          if (rvMatch) {
+            return {
+              score: parseFloat(rvMatch[1]),
+              count: rcMatch ? parseInt(rcMatch[1], 10) : 0,
+              url: pageUrl,
+            };
+          }
+          return null;
+        }
+
+        function buildSuccess(score, count, filmUrl) {
+          return {
+            letterboxd: {
+              channelKey: 'letterboxd',
+              status: 'success',
+              score: score,
+              scoreMax: 5,
+              displayValue: score.toFixed(2) + '/5',
+              count: count || null,
+              countText: count ? count.toLocaleString() : null,
+              url: filmUrl,
+              matchedBy: 'imdb_id',
+              matchConfidence: 'exact',
+              externalId: filmUrl,
+            },
+          };
+        }
+
+        // PRIMARY: CSI ratings-summary endpoint
+        deps.request(csiUrl).then(function (resp) {
+          if (resp.status >= 200 && resp.status < 300) {
+            var html = resp.responseText;
+            // Extract weighted average and count
+            var ratingMatch = html.match(/Weighted average of ([\d.]+) based on ([\d,]+)/);
+            if (ratingMatch) {
+              var score = parseFloat(ratingMatch[1]);
+              var count = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
+              // Try to extract film URL from CSI response
+              var filmUrlMatch = html.match(/href="(\/film\/[^"]+)"/);
+              var filmUrl = filmUrlMatch
+                ? 'https://letterboxd.com' + filmUrlMatch[1]
+                : fallbackUrl;
+              resolve(buildSuccess(score, count, filmUrl));
+              return;
+            }
+          }
+          // FALLBACK: full page fetch
+          deps.request(fallbackUrl).then(function (pageResp) {
+            var finalUrl = pageResp.finalUrl || fallbackUrl;
+            var parsed = parseFromPage(pageResp.responseText, finalUrl);
+            if (parsed && !isNaN(parsed.score)) {
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+            } else {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
+            }
+          }).catch(function () {
+            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
+          });
+        }).catch(function () {
+          // CSI request failed entirely, try fallback
+          deps.request(fallbackUrl).then(function (pageResp) {
+            var finalUrl = pageResp.finalUrl || fallbackUrl;
+            var parsed = parseFromPage(pageResp.responseText, finalUrl);
+            if (parsed && !isNaN(parsed.score)) {
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+            } else {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
+            }
+          }).catch(function () {
+            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
+          });
+        });
+      });
+    },
+  });
+
   // ============================================================
   // Scheduler — 并发抓取、缓存、限流、共存检测
   // ============================================================
