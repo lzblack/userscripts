@@ -581,182 +581,6 @@
   // Sources — 各平台评分获取定义
   // ============================================================
 
-  // --- NeoDB ---
-  sources.push({
-    key: 'neodb',
-    label: 'NeoDB',
-    version: 1,
-    types: ['book', 'movie', 'music', 'game'],
-    requiredConfig: null,
-    channels: [{ channelKey: 'neodb', label: 'NeoDB' }],
-    fetch: function (meta, deps) {
-      return new Promise(function (resolve) {
-        // 分类映射：music → album
-        var categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game' };
-        var category = categoryMap[meta.type] || 'all';
-
-        // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
-        var doubanUrl = location.href.split('?')[0].split('#')[0];
-        var queries = [doubanUrl];
-        if (meta.originalTitle && meta.originalTitle !== meta.title) {
-          queries.push(meta.originalTitle);
-        }
-        if (meta.title) {
-          queries.push(meta.title);
-        }
-
-        // 匹配 NeoDB 条目详情页路径
-        var detailPathRe = /neodb\.social\/(book|movie|album|music|game|tv\/season|tv|podcast|performance)\//;
-
-        function parseDetail(doc, url) {
-          // 优先用 JSON-LD aggregateRating
-          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (var i = 0; i < scripts.length; i++) {
-            try {
-              var data = JSON.parse(scripts[i].textContent);
-              var ar = data.aggregateRating;
-              if (ar && ar.ratingValue != null) {
-                var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount, 10) || 0;
-                if (isNaN(score)) continue;
-                return { found: true, hasRating: count > 0, score: score, count: count, url: url };
-              }
-            } catch (e) { /* skip */ }
-          }
-          // 回退：DOM 结构解析
-          var displayBlock =
-            doc.querySelector('#item-rating .display') ||
-            doc.querySelector('.rating .display') ||
-            doc.querySelector('.display');
-          var undisplayEl = doc.querySelector('.undisplay');
-          if (undisplayEl && !displayBlock) {
-            return { found: true, hasRating: false, url: url };
-          }
-          // 尝试找评分数字
-          var ratingEl =
-            doc.querySelector('.rating-num') ||
-            doc.querySelector('[itemprop="ratingValue"]');
-          if (!ratingEl && displayBlock) {
-            ratingEl = displayBlock.querySelector('hgroup h3') || displayBlock.querySelector('h3');
-          }
-          if (!ratingEl) {
-            ratingEl = Array.from(doc.querySelectorAll('h1,h2,h3,span,strong')).find(function (el) {
-              return /[\d.]+\s*\/\s*10/.test(el.textContent);
-            });
-          }
-          if (!ratingEl) return { found: true, hasRating: false, url: url };
-          var ratingMatch = ratingEl.textContent.match(/[\d.]+/);
-          if (!ratingMatch) return { found: true, hasRating: false, url: url };
-          var score = parseFloat(ratingMatch[0]);
-          // 评分人数
-          var countEl =
-            doc.querySelector('.rating-people') ||
-            doc.querySelector('[itemprop="ratingCount"]');
-          if (!countEl && displayBlock) {
-            countEl = Array.from(displayBlock.querySelectorAll('p,span,small')).find(function (el) {
-              return /\d+\s*(个评分|人评分|ratings?)/i.test(el.textContent);
-            });
-          }
-          var count = 0;
-          if (countEl) {
-            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
-            if (cm) count = parseInt(cm[1], 10);
-          }
-          return { found: true, hasRating: count > 0, score: score, count: count, url: url };
-        }
-
-        function buildResult(parsed, matchedBy, confidence) {
-          var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
-          if (!parsed || !parsed.found) {
-            return { neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } };
-          }
-          if (!parsed.hasRating) {
-            return { neodb: { channelKey: 'neodb', status: 'no_rating', url: parsed.url } };
-          }
-          return {
-            neodb: {
-              channelKey: 'neodb',
-              status: 'success',
-              score: parsed.score,
-              scoreMax: 10,
-              displayValue: parsed.score.toFixed(1) + '/10',
-              count: parsed.count,
-              countText: parsed.count.toLocaleString(),
-              url: parsed.url,
-              matchedBy: matchedBy,
-              matchConfidence: confidence,
-              externalId: parsed.url,
-            },
-          };
-        }
-
-        function fetchDetail(url, matchedBy, confidence, onSuccess, onFail) {
-          deps.request(url).then(function (resp) {
-            if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
-            var doc = deps.parseHTML(resp.responseText);
-            var parsed = parseDetail(doc, resp.finalUrl || url);
-            onSuccess(parsed, matchedBy, confidence);
-          }).catch(onFail);
-        }
-
-        function tryQuery(queryIndex) {
-          if (queryIndex >= queries.length) {
-            var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
-            resolve({ neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } });
-            return;
-          }
-          var query = queries[queryIndex];
-          var isUrlQuery = /^https?:\/\//.test(query);
-          var matchedBy = isUrlQuery ? 'douban_url' : 'title';
-          var confidence = isUrlQuery ? 'exact' : 'fuzzy';
-          var searchUrl = 'https://neodb.social/search?' + new URLSearchParams({ q: query, category: category }).toString();
-
-          deps.request(searchUrl).then(function (resp) {
-            if (resp.status < 200 || resp.status >= 300) {
-              tryQuery(queryIndex + 1);
-              return;
-            }
-            var finalUrl = resp.finalUrl || searchUrl;
-            // 情况一：搜索直接重定向到详情页
-            if (detailPathRe.test(finalUrl)) {
-              var doc = deps.parseHTML(resp.responseText);
-              var parsed = parseDetail(doc, finalUrl);
-              if (parsed && parsed.found) {
-                resolve(buildResult(parsed, matchedBy, confidence));
-              } else {
-                tryQuery(queryIndex + 1);
-              }
-              return;
-            }
-            // 情况二：搜索列表页，找第一个结果卡片
-            var doc = deps.parseHTML(resp.responseText);
-            var card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
-            if (!card) { tryQuery(queryIndex + 1); return; }
-            var linkEl = card.querySelector('.title a') || card.querySelector('a');
-            if (!linkEl) { tryQuery(queryIndex + 1); return; }
-            var href = linkEl.getAttribute('href') || '';
-            var detailUrl = href.startsWith('http') ? href : 'https://neodb.social' + href;
-            fetchDetail(
-              detailUrl,
-              matchedBy,
-              confidence,
-              function (parsed, mb, conf) {
-                if (parsed && parsed.found) {
-                  resolve(buildResult(parsed, mb, conf));
-                } else {
-                  tryQuery(queryIndex + 1);
-                }
-              },
-              function () { tryQuery(queryIndex + 1); }
-            );
-          }).catch(function () { tryQuery(queryIndex + 1); });
-        }
-
-        tryQuery(0);
-      });
-    },
-  });
-
   // --- IMDB ---
   sources.push({
     key: 'imdb', label: 'IMDB', version: 1,
@@ -813,184 +637,6 @@
           resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
         }).catch(function () {
           resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
-        });
-      });
-    },
-  });
-
-  // --- Letterboxd ---
-  sources.push({
-    key: 'letterboxd', label: 'Letterboxd', version: 1,
-    types: ['movie'], requiredConfig: null,
-    channels: [{ channelKey: 'letterboxd', label: 'Letterboxd' }],
-    fetch: function (meta, deps) {
-      return new Promise(function (resolve) {
-        var searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
-        if (!meta.imdbId) {
-          resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
-          return;
-        }
-
-        var csiUrl = 'https://letterboxd.com/csi/film/imdb/' + meta.imdbId + '/ratings-summary/';
-        var fallbackUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
-
-        function parseFromPage(html, pageUrl) {
-          var doc = deps.parseHTML(html);
-          // Try LD+JSON first
-          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (var i = 0; i < scripts.length; i++) {
-            try {
-              var data = JSON.parse(scripts[i].textContent);
-              var ar = data.aggregateRating;
-              if (ar && ar.ratingValue != null) {
-                var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount, 10) || 0;
-                if (!isNaN(score)) {
-                  return { score: score, count: count, url: pageUrl };
-                }
-              }
-            } catch (e) { /* skip */ }
-          }
-          // Regex fallback
-          var rvMatch = html.match(/"ratingValue"\s*:\s*([\d.]+)/);
-          var rcMatch = html.match(/"ratingCount"\s*:\s*([\d]+)/);
-          if (rvMatch) {
-            return {
-              score: parseFloat(rvMatch[1]),
-              count: rcMatch ? parseInt(rcMatch[1], 10) : 0,
-              url: pageUrl,
-            };
-          }
-          return null;
-        }
-
-        function buildSuccess(score, count, filmUrl) {
-          return {
-            letterboxd: {
-              channelKey: 'letterboxd',
-              status: 'success',
-              score: score,
-              scoreMax: 5,
-              displayValue: score.toFixed(2) + '/5',
-              count: count || null,
-              countText: count ? count.toLocaleString() : null,
-              url: filmUrl,
-              matchedBy: 'imdb_id',
-              matchConfidence: 'exact',
-              externalId: filmUrl,
-            },
-          };
-        }
-
-        // PRIMARY: CSI ratings-summary endpoint
-        deps.request(csiUrl).then(function (resp) {
-          if (resp.status >= 200 && resp.status < 300) {
-            var html = resp.responseText;
-            // Extract weighted average and count
-            var ratingMatch = html.match(/Weighted average of ([\d.]+) based on ([\d,]+)/);
-            if (ratingMatch) {
-              var score = parseFloat(ratingMatch[1]);
-              var count = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
-              // Try to extract film URL from CSI response
-              var filmUrlMatch = html.match(/href="(\/film\/[^"]+)"/);
-              var filmUrl = filmUrlMatch
-                ? 'https://letterboxd.com' + filmUrlMatch[1]
-                : fallbackUrl;
-              resolve(buildSuccess(score, count, filmUrl));
-              return;
-            }
-          }
-          // FALLBACK: full page fetch
-          deps.request(fallbackUrl).then(function (pageResp) {
-            var finalUrl = pageResp.finalUrl || fallbackUrl;
-            var parsed = parseFromPage(pageResp.responseText, finalUrl);
-            if (parsed && !isNaN(parsed.score)) {
-              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
-            } else {
-              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
-            }
-          }).catch(function () {
-            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
-          });
-        }).catch(function () {
-          // CSI request failed entirely, try fallback
-          deps.request(fallbackUrl).then(function (pageResp) {
-            var finalUrl = pageResp.finalUrl || fallbackUrl;
-            var parsed = parseFromPage(pageResp.responseText, finalUrl);
-            if (parsed && !isNaN(parsed.score)) {
-              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
-            } else {
-              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
-            }
-          }).catch(function () {
-            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
-          });
-        });
-      });
-    },
-  });
-
-  // --- Metacritic ---
-  sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 1,
-    types: ['movie'], requiredConfig: null,
-    channels: [{ channelKey: 'metacritic', label: 'Metacritic' }],
-    fetch: function (meta, deps) {
-      return new Promise(function (resolve) {
-        var titleForSlug = meta.originalTitle || meta.title || '';
-        // Build slug: lowercase, remove non-alphanumeric except spaces, replace spaces with hyphens
-        var slug = titleForSlug
-          .toLowerCase()
-          .replace(/[^a-z0-9 ]/g, '')
-          .trim()
-          .replace(/\s+/g, '-');
-
-        var searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
-        var matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
-
-        if (!slug) {
-          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-          return;
-        }
-
-        var apiUrl = 'https://backend.metacritic.com/movies/metacritic/' + slug + '/web';
-        deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
-          if (resp.status === 404) {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-            return;
-          }
-          if (resp.status < 200 || resp.status >= 300) {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-            return;
-          }
-          try {
-            var data = JSON.parse(resp.responseText);
-            var score = data && data.criticScoreSummary && data.criticScoreSummary.score;
-            if (score == null || isNaN(Number(score))) {
-              resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/movie/' + slug + '/' } });
-              return;
-            }
-            score = Number(score);
-            resolve({
-              metacritic: {
-                channelKey: 'metacritic',
-                status: 'success',
-                score: score,
-                scoreMax: 100,
-                displayValue: score + '/100',
-                count: null,
-                countText: null,
-                url: 'https://www.metacritic.com/movie/' + slug + '/',
-                matchedBy: 'title_slug',
-                matchConfidence: matchConfidence,
-                externalId: slug,
-              },
-            });
-          } catch (e) {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-          }
-        }).catch(function () {
-          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
         });
       });
     },
@@ -1121,6 +767,184 @@
           });
         }).catch(function () {
           noMatchBoth();
+        });
+      });
+    },
+  });
+
+  // --- Metacritic ---
+  sources.push({
+    key: 'metacritic', label: 'Metacritic', version: 1,
+    types: ['movie'], requiredConfig: null,
+    channels: [{ channelKey: 'metacritic', label: 'Metacritic' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var titleForSlug = meta.originalTitle || meta.title || '';
+        // Build slug: lowercase, remove non-alphanumeric except spaces, replace spaces with hyphens
+        var slug = titleForSlug
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]/g, '')
+          .trim()
+          .replace(/\s+/g, '-');
+
+        var searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
+        var matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+
+        if (!slug) {
+          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+          return;
+        }
+
+        var apiUrl = 'https://backend.metacritic.com/movies/metacritic/' + slug + '/web';
+        deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
+          if (resp.status === 404) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+            return;
+          }
+          if (resp.status < 200 || resp.status >= 300) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+            return;
+          }
+          try {
+            var data = JSON.parse(resp.responseText);
+            var score = data && data.criticScoreSummary && data.criticScoreSummary.score;
+            if (score == null || isNaN(Number(score))) {
+              resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/movie/' + slug + '/' } });
+              return;
+            }
+            score = Number(score);
+            resolve({
+              metacritic: {
+                channelKey: 'metacritic',
+                status: 'success',
+                score: score,
+                scoreMax: 100,
+                displayValue: score + '/100',
+                count: null,
+                countText: null,
+                url: 'https://www.metacritic.com/movie/' + slug + '/',
+                matchedBy: 'title_slug',
+                matchConfidence: matchConfidence,
+                externalId: slug,
+              },
+            });
+          } catch (e) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+          }
+        }).catch(function () {
+          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+        });
+      });
+    },
+  });
+
+  // --- Letterboxd ---
+  sources.push({
+    key: 'letterboxd', label: 'Letterboxd', version: 1,
+    types: ['movie'], requiredConfig: null,
+    channels: [{ channelKey: 'letterboxd', label: 'Letterboxd' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        var searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
+        if (!meta.imdbId) {
+          resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
+          return;
+        }
+
+        var csiUrl = 'https://letterboxd.com/csi/film/imdb/' + meta.imdbId + '/ratings-summary/';
+        var fallbackUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
+
+        function parseFromPage(html, pageUrl) {
+          var doc = deps.parseHTML(html);
+          // Try LD+JSON first
+          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < scripts.length; i++) {
+            try {
+              var data = JSON.parse(scripts[i].textContent);
+              var ar = data.aggregateRating;
+              if (ar && ar.ratingValue != null) {
+                var score = parseFloat(ar.ratingValue);
+                var count = parseInt(ar.ratingCount, 10) || 0;
+                if (!isNaN(score)) {
+                  return { score: score, count: count, url: pageUrl };
+                }
+              }
+            } catch (e) { /* skip */ }
+          }
+          // Regex fallback
+          var rvMatch = html.match(/"ratingValue"\s*:\s*([\d.]+)/);
+          var rcMatch = html.match(/"ratingCount"\s*:\s*([\d]+)/);
+          if (rvMatch) {
+            return {
+              score: parseFloat(rvMatch[1]),
+              count: rcMatch ? parseInt(rcMatch[1], 10) : 0,
+              url: pageUrl,
+            };
+          }
+          return null;
+        }
+
+        function buildSuccess(score, count, filmUrl) {
+          return {
+            letterboxd: {
+              channelKey: 'letterboxd',
+              status: 'success',
+              score: score,
+              scoreMax: 5,
+              displayValue: score.toFixed(2) + '/5',
+              count: count || null,
+              countText: count ? count.toLocaleString() : null,
+              url: filmUrl,
+              matchedBy: 'imdb_id',
+              matchConfidence: 'exact',
+              externalId: filmUrl,
+            },
+          };
+        }
+
+        // PRIMARY: CSI ratings-summary endpoint
+        deps.request(csiUrl).then(function (resp) {
+          if (resp.status >= 200 && resp.status < 300) {
+            var html = resp.responseText;
+            // Extract weighted average and count
+            var ratingMatch = html.match(/Weighted average of ([\d.]+) based on ([\d,]+)/);
+            if (ratingMatch) {
+              var score = parseFloat(ratingMatch[1]);
+              var count = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
+              // Try to extract film URL from CSI response
+              var filmUrlMatch = html.match(/href="(\/film\/[^"]+)"/);
+              var filmUrl = filmUrlMatch
+                ? 'https://letterboxd.com' + filmUrlMatch[1]
+                : fallbackUrl;
+              resolve(buildSuccess(score, count, filmUrl));
+              return;
+            }
+          }
+          // FALLBACK: full page fetch
+          deps.request(fallbackUrl).then(function (pageResp) {
+            var finalUrl = pageResp.finalUrl || fallbackUrl;
+            var parsed = parseFromPage(pageResp.responseText, finalUrl);
+            if (parsed && !isNaN(parsed.score)) {
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+            } else {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
+            }
+          }).catch(function () {
+            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
+          });
+        }).catch(function () {
+          // CSI request failed entirely, try fallback
+          deps.request(fallbackUrl).then(function (pageResp) {
+            var finalUrl = pageResp.finalUrl || fallbackUrl;
+            var parsed = parseFromPage(pageResp.responseText, finalUrl);
+            if (parsed && !isNaN(parsed.score)) {
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+            } else {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
+            }
+          }).catch(function () {
+            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
+          });
         });
       });
     },
@@ -1593,6 +1417,182 @@
             },
           });
         }).catch(function () { noMatch(); });
+      });
+    },
+  });
+
+  // --- NeoDB ---
+  sources.push({
+    key: 'neodb',
+    label: 'NeoDB',
+    version: 1,
+    types: ['book', 'movie', 'music', 'game'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'neodb', label: 'NeoDB' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        // 分类映射：music → album
+        var categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game' };
+        var category = categoryMap[meta.type] || 'all';
+
+        // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
+        var doubanUrl = location.href.split('?')[0].split('#')[0];
+        var queries = [doubanUrl];
+        if (meta.originalTitle && meta.originalTitle !== meta.title) {
+          queries.push(meta.originalTitle);
+        }
+        if (meta.title) {
+          queries.push(meta.title);
+        }
+
+        // 匹配 NeoDB 条目详情页路径
+        var detailPathRe = /neodb\.social\/(book|movie|album|music|game|tv\/season|tv|podcast|performance)\//;
+
+        function parseDetail(doc, url) {
+          // 优先用 JSON-LD aggregateRating
+          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < scripts.length; i++) {
+            try {
+              var data = JSON.parse(scripts[i].textContent);
+              var ar = data.aggregateRating;
+              if (ar && ar.ratingValue != null) {
+                var score = parseFloat(ar.ratingValue);
+                var count = parseInt(ar.ratingCount, 10) || 0;
+                if (isNaN(score)) continue;
+                return { found: true, hasRating: count > 0, score: score, count: count, url: url };
+              }
+            } catch (e) { /* skip */ }
+          }
+          // 回退：DOM 结构解析
+          var displayBlock =
+            doc.querySelector('#item-rating .display') ||
+            doc.querySelector('.rating .display') ||
+            doc.querySelector('.display');
+          var undisplayEl = doc.querySelector('.undisplay');
+          if (undisplayEl && !displayBlock) {
+            return { found: true, hasRating: false, url: url };
+          }
+          // 尝试找评分数字
+          var ratingEl =
+            doc.querySelector('.rating-num') ||
+            doc.querySelector('[itemprop="ratingValue"]');
+          if (!ratingEl && displayBlock) {
+            ratingEl = displayBlock.querySelector('hgroup h3') || displayBlock.querySelector('h3');
+          }
+          if (!ratingEl) {
+            ratingEl = Array.from(doc.querySelectorAll('h1,h2,h3,span,strong')).find(function (el) {
+              return /[\d.]+\s*\/\s*10/.test(el.textContent);
+            });
+          }
+          if (!ratingEl) return { found: true, hasRating: false, url: url };
+          var ratingMatch = ratingEl.textContent.match(/[\d.]+/);
+          if (!ratingMatch) return { found: true, hasRating: false, url: url };
+          var score = parseFloat(ratingMatch[0]);
+          // 评分人数
+          var countEl =
+            doc.querySelector('.rating-people') ||
+            doc.querySelector('[itemprop="ratingCount"]');
+          if (!countEl && displayBlock) {
+            countEl = Array.from(displayBlock.querySelectorAll('p,span,small')).find(function (el) {
+              return /\d+\s*(个评分|人评分|ratings?)/i.test(el.textContent);
+            });
+          }
+          var count = 0;
+          if (countEl) {
+            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            if (cm) count = parseInt(cm[1], 10);
+          }
+          return { found: true, hasRating: count > 0, score: score, count: count, url: url };
+        }
+
+        function buildResult(parsed, matchedBy, confidence) {
+          var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+          if (!parsed || !parsed.found) {
+            return { neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } };
+          }
+          if (!parsed.hasRating) {
+            return { neodb: { channelKey: 'neodb', status: 'no_rating', url: parsed.url } };
+          }
+          return {
+            neodb: {
+              channelKey: 'neodb',
+              status: 'success',
+              score: parsed.score,
+              scoreMax: 10,
+              displayValue: parsed.score.toFixed(1) + '/10',
+              count: parsed.count,
+              countText: parsed.count.toLocaleString(),
+              url: parsed.url,
+              matchedBy: matchedBy,
+              matchConfidence: confidence,
+              externalId: parsed.url,
+            },
+          };
+        }
+
+        function fetchDetail(url, matchedBy, confidence, onSuccess, onFail) {
+          deps.request(url).then(function (resp) {
+            if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
+            var doc = deps.parseHTML(resp.responseText);
+            var parsed = parseDetail(doc, resp.finalUrl || url);
+            onSuccess(parsed, matchedBy, confidence);
+          }).catch(onFail);
+        }
+
+        function tryQuery(queryIndex) {
+          if (queryIndex >= queries.length) {
+            var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+            resolve({ neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } });
+            return;
+          }
+          var query = queries[queryIndex];
+          var isUrlQuery = /^https?:\/\//.test(query);
+          var matchedBy = isUrlQuery ? 'douban_url' : 'title';
+          var confidence = isUrlQuery ? 'exact' : 'fuzzy';
+          var searchUrl = 'https://neodb.social/search?' + new URLSearchParams({ q: query, category: category }).toString();
+
+          deps.request(searchUrl).then(function (resp) {
+            if (resp.status < 200 || resp.status >= 300) {
+              tryQuery(queryIndex + 1);
+              return;
+            }
+            var finalUrl = resp.finalUrl || searchUrl;
+            // 情况一：搜索直接重定向到详情页
+            if (detailPathRe.test(finalUrl)) {
+              var doc = deps.parseHTML(resp.responseText);
+              var parsed = parseDetail(doc, finalUrl);
+              if (parsed && parsed.found) {
+                resolve(buildResult(parsed, matchedBy, confidence));
+              } else {
+                tryQuery(queryIndex + 1);
+              }
+              return;
+            }
+            // 情况二：搜索列表页，找第一个结果卡片
+            var doc = deps.parseHTML(resp.responseText);
+            var card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
+            if (!card) { tryQuery(queryIndex + 1); return; }
+            var linkEl = card.querySelector('.title a') || card.querySelector('a');
+            if (!linkEl) { tryQuery(queryIndex + 1); return; }
+            var href = linkEl.getAttribute('href') || '';
+            var detailUrl = href.startsWith('http') ? href : 'https://neodb.social' + href;
+            fetchDetail(
+              detailUrl,
+              matchedBy,
+              confidence,
+              function (parsed, mb, conf) {
+                if (parsed && parsed.found) {
+                  resolve(buildResult(parsed, mb, conf));
+                } else {
+                  tryQuery(queryIndex + 1);
+                }
+              },
+              function () { tryQuery(queryIndex + 1); }
+            );
+          }).catch(function () { tryQuery(queryIndex + 1); });
+        }
+
+        tryQuery(0);
       });
     },
   });
