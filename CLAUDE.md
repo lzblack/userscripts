@@ -12,6 +12,7 @@ Monorepo of standalone browser userscripts (Tampermonkey/Violentmonkey). Each sc
 |---|---|---|
 | `douban-neodb-ratings/` | Douban (book/movie/music/game pages) | Fetches and displays NeoDB.social ratings alongside Douban's own ratings. Uses `GM_xmlhttpRequest` for cross-origin requests to neodb.social. |
 | `douban-title-mark-search/` | Douban (all pages) | Converts Chinese book title marks (`《》`) into clickable Douban search links. Uses MutationObserver for dynamically loaded content. |
+| `douban-book-version-marker/` | Douban (book pages) | Shows tips when the user has marked a different edition of the same work (想读/在读/已读). Uses `/j/subject/{id}/interest` AJAX endpoint. |
 | `x-draggable-tweets/` | X.com / Twitter | Makes tweet cards draggable as real `<a>` links for drag extensions (e.g., Glitter Drag). Reads tweet URLs from DOM and React fiber internals. |
 
 ## Development Workflow
