@@ -620,7 +620,7 @@
 
   // --- IMDB ---
   sources.push({
-    key: 'imdb', label: 'IMDB', version: 1,
+    key: 'imdb', label: 'IMDB', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -996,7 +996,7 @@
 
   // --- TMDB ---
   sources.push({
-    key: 'tmdb', label: 'TMDB', version: 1,
+    key: 'tmdb', label: 'TMDB', version: 2,
     types: ['movie'],
     requiredConfig: ['tmdbApiKey'],
     channels: [{ channelKey: 'tmdb', label: 'TMDB', icon: 'https://www.themoviedb.org/favicon.ico' }],
