@@ -654,6 +654,15 @@
   // Sources — 各平台评分获取定义
   // ============================================================
 
+  // 去除标题中的季数信息，用于 RT/Metacritic 搜索
+  // "Louie Season 1" → "Louie", "Breaking Bad Season 5" → "Breaking Bad"
+  function stripSeason(title) {
+    return (title || '')
+      .replace(/\s*[,:]?\s*Season\s+\d+/i, '')
+      .replace(/\s*第.{1,3}季/g, '')
+      .trim();
+  }
+
   // --- IMDB ---
   sources.push({
     key: 'imdb', label: 'IMDB', version: 3,
@@ -717,7 +726,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 2,
+    key: 'rottentomatoes', label: '烂番茄', version: 3,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -725,7 +734,8 @@
     ],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        const titleForSearch = meta.originalTitle || meta.title || '';
+        const titleRaw = meta.originalTitle || meta.title || '';
+        const titleForSearch = stripSeason(titleRaw);
         const searchUrl = 'https://www.rottentomatoes.com/search?search=' + encodeURIComponent(titleForSearch);
         const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
 
@@ -861,12 +871,13 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 4,
+    key: 'metacritic', label: 'Metacritic', version: 5,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        const titleForSlug = meta.originalTitle || meta.title || '';
+        const titleRaw = meta.originalTitle || meta.title || '';
+        const titleForSlug = stripSeason(titleRaw);
         const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
         const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
 
