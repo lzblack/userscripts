@@ -777,14 +777,19 @@
           const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ''); };
           const queryNorm = normalize(titleForSearch);
           let bestLink = null;
-          for (let i = 0; i < allResults.length; i++) {
+          let bestScore = 0;
+          for (let i = 0; i < Math.min(allResults.length, 20); i++) {
             const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
             if (!nameEl) continue;
             const resultTitle = normalize(nameEl.textContent);
-            // 精确包含或被包含
-            if (resultTitle.includes(queryNorm) || queryNorm.includes(resultTitle)) {
-              bestLink = nameEl;
-              break;
+            // 精确匹配优先
+            if (resultTitle === queryNorm) { bestLink = nameEl; break; }
+            // 包含匹配：要求较短串长度 >= 较长串的 60%，防止 "pete" 匹配 "horaceandpete"
+            const longer = Math.max(resultTitle.length, queryNorm.length);
+            const shorter = Math.min(resultTitle.length, queryNorm.length);
+            if (shorter >= longer * 0.6 && (resultTitle.includes(queryNorm) || queryNorm.includes(resultTitle))) {
+              const similarity = shorter / longer;
+              if (similarity > bestScore) { bestScore = similarity; bestLink = nameEl; }
             }
           }
           if (!bestLink) {
