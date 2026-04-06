@@ -481,7 +481,7 @@
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
-      '.rating-hub-count { color: #999; margin-left: 4px; }',
+      '.rating-hub-count { color: #999; margin-left: -2px; }',
       '.rating-hub-status { color: #999; }',
       '.rating-hub-status a { color: #37a; text-decoration: none; }',
       '.rating-hub-status a:hover { text-decoration: underline; }',
