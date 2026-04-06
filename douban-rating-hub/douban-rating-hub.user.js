@@ -168,18 +168,19 @@
       }
     }
 
-    // IMDb ID（电影/剧集条目中通常有「IMDb:」标签）
+    // IMDb ID — 用正则从 #info 全文提取，比 DOM 遍历更稳健
+    // 兼容多种格式：纯文本节点、<a> 标签包裹、冒号在 span 内外
     let imdbId = null;
     if (infoEl) {
-      const labels = Array.from(infoEl.querySelectorAll('span.pl'));
-      const imdbSpan = labels.find((span) => span.textContent.includes('IMDb'));
-      if (imdbSpan) {
-        // IMDb ID 在紧随其后的文本节点中
-        const sibling = imdbSpan.nextSibling;
-        if (sibling) {
-          const raw = sibling.textContent.trim();
-          const idMatch = raw.match(/tt\d+/);
-          if (idMatch) imdbId = idMatch[0];
+      const imdbMatch = infoEl.textContent.match(/IMDb\s*(?:链接)?\s*:?\s*(tt\d+)/i);
+      if (imdbMatch) {
+        imdbId = imdbMatch[1];
+      } else {
+        // 备选：从 <a> 链接 href 中提取
+        const imdbLink = infoEl.querySelector('a[href*="imdb.com/title/tt"]');
+        if (imdbLink) {
+          const hrefMatch = imdbLink.href.match(/(tt\d+)/);
+          if (hrefMatch) imdbId = hrefMatch[1];
         }
       }
     }
