@@ -967,7 +967,7 @@
     channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        const searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
+        const searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(stripSeason(meta.originalTitle || meta.title || '')) + '/';
         if (!meta.imdbId) {
           resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
           return;
