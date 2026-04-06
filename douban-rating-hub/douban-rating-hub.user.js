@@ -969,7 +969,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 1,
+    key: 'rottentomatoes', label: '烂番茄', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -1127,8 +1127,8 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 1,
-    types: ['movie'], requiredConfig: null,
+    key: 'metacritic', label: 'Metacritic', version: 2,
+    types: ['movie', 'game'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
@@ -1180,11 +1180,13 @@
               const item = data && data.data && data.data.item;
               let score = item && item.criticScoreSummary && item.criticScoreSummary.score;
               if (score == null || isNaN(Number(score))) {
-                resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/' + pathType.replace('shows', 'tv') + '/' + slug + '/' } });
+                const mcUrlNoRating = pathType === 'shows' ? 'tv' : (pathType === 'games' ? 'game' : 'movie');
+                resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/' + mcUrlNoRating + '/' + slug + '/' } });
                 return;
               }
               score = Number(score);
-              const mcUrlType = pathType === 'shows' ? 'tv' : 'movie';
+              const reviewCount = (item && item.criticScoreSummary && item.criticScoreSummary.reviewCount) || null;
+              const mcUrlType = pathType === 'shows' ? 'tv' : (pathType === 'games' ? 'game' : 'movie');
               resolve({
                 metacritic: {
                   channelKey: 'metacritic',
@@ -1192,8 +1194,8 @@
                   score: score,
                   scoreMax: 100,
                   displayValue: score + '/100',
-                  count: null,
-                  countText: null,
+                  count: reviewCount,
+                  countText: reviewCount ? reviewCount.toLocaleString() : null,
                   url: 'https://www.metacritic.com/' + mcUrlType + '/' + slug + '/',
                   matchedBy: 'title_slug',
                   matchConfidence: matchConfidence,
@@ -1205,7 +1207,9 @@
             }
           }).catch(function () { tryMetacritic(paths.slice(1)); });
         }
-        tryMetacritic(['movies', 'shows']);
+        // 按条目类型决定尝试顺序
+        const mcPaths = meta.type === 'game' ? ['games'] : ['movies', 'shows'];
+        tryMetacritic(mcPaths);
       });
     },
   });
