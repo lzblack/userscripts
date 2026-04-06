@@ -456,7 +456,7 @@
     style.id = 'rating-hub-style';
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
-      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; }',
+      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
       '.rating-hub-label { color: #37a; text-decoration: none; min-width: 110px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
@@ -599,7 +599,8 @@
         errLink.href = result.url;
         errLink.target = '_blank';
         errLink.rel = 'noopener noreferrer';
-        errLink.textContent = '点击查看';
+        const idMatch = result.url.match(/tt\d+/);
+        errLink.textContent = idMatch ? idMatch[0] + ' →' : '点击查看';
         statusEl.appendChild(errLink);
       } else {
         statusEl.textContent = '加载失败';
@@ -1781,9 +1782,9 @@
             status: 'success',
             score: rank,
             scoreMax: null,
-            displayValue: '榜 #' + rank,
+            displayValue: '#' + rank,
             count: avgPlay,
-            countText: '均播 ' + (avgPlay >= 10000 ? (avgPlay / 10000).toFixed(1) + '万' : avgPlay.toLocaleString()),
+            countText: avgPlay >= 10000 ? (avgPlay / 10000).toFixed(1) + '万播放' : avgPlay.toLocaleString() + '播放',
             url: xyzUrl || 'https://xyzrank.com/',
             matchedBy: 'title',
             matchConfidence: 'fuzzy',
@@ -1816,6 +1817,12 @@
         }
         if (meta.title) {
           queries.push(meta.title);
+          // 对含分隔符的标题（如 "半拿铁 | 商业沉浮录"），也尝试第一段作为查询
+          const parts = meta.title.split(/[|｜\/]/);
+          if (parts.length > 1) {
+            const shortTitle = parts[0].trim();
+            if (shortTitle && shortTitle !== meta.title) queries.push(shortTitle);
+          }
         }
 
         // 匹配 NeoDB 条目详情页路径
@@ -1914,7 +1921,9 @@
 
         function tryQuery(queryIndex) {
           if (queryIndex >= queries.length) {
-            const searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+            const noMatchParams = { q: queries[0] };
+            if (category !== 'all') noMatchParams.category = category;
+            const searchUrl = 'https://neodb.social/search?' + new URLSearchParams(noMatchParams).toString();
             resolve({ neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } });
             return;
           }
@@ -1922,7 +1931,9 @@
           const isUrlQuery = /^https?:\/\//.test(query);
           const matchedBy = isUrlQuery ? 'douban_url' : 'title';
           const confidence = isUrlQuery ? 'exact' : 'fuzzy';
-          const searchUrl = 'https://neodb.social/search?' + new URLSearchParams({ q: query, category: category }).toString();
+          const searchParams = { q: query };
+          if (category !== 'all') searchParams.category = category;
+          const searchUrl = 'https://neodb.social/search?' + new URLSearchParams(searchParams).toString();
 
           deps.request(searchUrl).then(function (resp) {
             if (resp.status < 200 || resp.status >= 300) {
