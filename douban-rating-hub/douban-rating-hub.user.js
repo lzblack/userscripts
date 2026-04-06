@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
-// @version      0.1.0
+// @version      1.0.0
 // @description  在豆瓣条目页聚合显示 IMDB、烂番茄、Metacritic、Letterboxd、Goodreads、Amazon、微信读书、NeoDB 等多平台评分
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -35,6 +35,8 @@
 // @grant        GM_registerMenuCommand
 // @icon         https://img3.doubanio.com/favicon.ico
 // @license      MIT
+// @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-rating-hub/douban-rating-hub.user.js
+// @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/douban-rating-hub/douban-rating-hub.user.js
 // ==/UserScript==
 
 (function () {
@@ -688,8 +690,8 @@
 
     const isAnime = meta.type === 'movie' && meta.genres && meta.genres.indexOf('动画') !== -1;
     const visibleKeys = isAnime
-      ? ['imdb', 'rt_critics', 'rt_audience', 'letterboxd', 'bangumi', 'mal', 'neodb']
-      : ['imdb', 'rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'tmdb', 'neodb'];
+      ? ['imdb', 'rt_critics', 'rt_audience', 'bangumi', 'mal', 'neodb']
+      : ['imdb', 'rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'neodb'];
     const visibleSet = new Set(visibleKeys);
 
     return channels
