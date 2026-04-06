@@ -888,9 +888,6 @@
           }).catch(function () { tryMetacritic(paths.slice(1)); });
         }
         tryMetacritic(['movies', 'shows']);
-        }).catch(function () {
-          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-        });
       });
     },
   });
