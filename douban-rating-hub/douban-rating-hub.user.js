@@ -456,8 +456,8 @@
     style.id = 'rating-hub-style';
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
-      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; }',
-      '.rating-hub-label { color: #37a; text-decoration: none; min-width: 110px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
+      '.rating-hub-row { display: flex; align-items: center; gap: 4px; line-height: 2; white-space: nowrap; }',
+      '.rating-hub-label { color: #37a; text-decoration: none; min-width: 72px; border-radius: 3px; padding: 0 2px; transition: color 0.2s, background-color 0.2s; font-size: 12px; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
@@ -545,7 +545,12 @@
       if (result.count) {
         const countEl = document.createElement('span');
         countEl.className = 'rating-hub-count';
-        countEl.textContent = '(' + (result.countText || result.count.toLocaleString()) + ')';
+        // 大数字缩写：>= 1万 → "X.X万"，>= 1000万 → "XXX万"
+        let countDisplay = result.countText || result.count.toLocaleString();
+        if (!result.countText && result.count >= 10000) {
+          countDisplay = (result.count / 10000).toFixed(result.count >= 100000000 ? 0 : 1) + '万';
+        }
+        countEl.textContent = '(' + countDisplay + ')';
         row.appendChild(countEl);
       }
 
@@ -926,7 +931,7 @@
 
   // --- Letterboxd ---
   sources.push({
-    key: 'letterboxd', label: 'Letterboxd', version: 1,
+    key: 'letterboxd', label: 'Letterboxd', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -990,7 +995,13 @@
 
         // THIRD FALLBACK: search by title
         function tryTitleSearch() {
-          const titleSearchUrl = 'https://letterboxd.com/search/films/' + encodeURIComponent(meta.originalTitle || meta.title || '') + '/';
+          // Letterboxd 只有英文内容，用 originalTitle；纯中文标题不搜
+          const searchTitle = meta.originalTitle || meta.title || '';
+          if (!/[a-zA-Z]/.test(searchTitle)) {
+            resolve(noMatch());
+            return;
+          }
+          const titleSearchUrl = 'https://letterboxd.com/search/films/' + encodeURIComponent(searchTitle) + '/';
           deps.request(titleSearchUrl).then(function (searchResp) {
             if (searchResp.status < 200 || searchResp.status >= 300) {
               resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
@@ -1652,11 +1663,11 @@
   // --- Apple Podcasts ---
   sources.push({
     key: 'apple_podcasts',
-    label: 'Apple Podcasts',
+    label: '苹果播客',
     version: 1,
     types: ['podcast'],
     requiredConfig: null,
-    channels: [{ channelKey: 'apple_podcasts', label: 'Apple Podcasts', icon: 'https://podcasts.apple.com/favicon.ico' }],
+    channels: [{ channelKey: 'apple_podcasts', label: '苹果播客', icon: 'https://podcasts.apple.com/favicon.ico' }],
     fetch: function (meta, deps) {
       const searchUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(meta.title) + '&media=podcast&country=us&limit=5';
 
