@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
-// @version      1.0.0
+// @version      1.0.1
 // @description  在豆瓣条目页聚合显示 IMDB、烂番茄、Metacritic、Letterboxd、Goodreads、Amazon、微信读书、NeoDB 等多平台评分
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -34,6 +34,7 @@
 // @grant        GM_listValues
 // @grant        GM_registerMenuCommand
 // @icon         https://img3.doubanio.com/favicon.ico
+// @icon64       https://img3.doubanio.com/favicon.ico
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-rating-hub/douban-rating-hub.user.js
 // @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/douban-rating-hub/douban-rating-hub.user.js

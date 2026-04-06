@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         豆瓣书名号转搜索链接
 // @namespace    https://github.com/lzblack
-// @version      1.2.1
+// @version      1.2.2
 // @author       lzblack
 // @description  将豆瓣网站上的书名号《》中的内容转换为可点击的搜索链接，就像豆瓣 App 一样！点击书名号内的文字即可快速搜索，无需手动复制粘贴。
 // @license      MIT
 // @icon         https://img1.doubanio.com/favicon.ico
+// @icon64       https://img1.doubanio.com/favicon.ico
 // @match        https://*.douban.com/*
 // @match        http://*.douban.com/*
 // @grant        none
