@@ -626,10 +626,10 @@
     const style = document.createElement('style');
     style.id = 'rating-hub-style';
     style.textContent = [
-      '.rating-hub-container { margin-top: 8px; font-size: 12px; color: #333; }',
-      '.rating-hub-row { display: flex; align-items: baseline; flex-wrap: nowrap; column-gap: 6px; line-height: 1.75; }',
-      '.rating-hub-label { display: inline-flex; align-items: center; min-width: 90px; width: 90px; max-width: 90px; color: #37a; text-decoration: none; border-radius: 3px; padding: 0 2px; transition: color 0.16s ease-out, background-color 0.16s ease-out, box-shadow 0.16s ease-out; font-size: 12px; flex-shrink: 0; }',
-      '.rating-hub-score { display: inline-flex; align-items: baseline; gap: 1px; color: #2f2f2f; font-variant-numeric: tabular-nums; min-width: 3.75em; letter-spacing: 0.01em; }',
+      '.rating-hub-container { margin-top: 0; padding: 15px 0 0; border-top: 1px solid #eaeaea; font-size: 12px; color: #333; }',
+      '.rating-hub-row { display: flex; align-items: center; flex-wrap: nowrap; column-gap: 6px; line-height: 1.75; }',
+      '.rating-hub-label { display: inline-flex; align-items: center; min-width: 90px; width: 90px; max-width: 90px; color: #37a; text-decoration: none; border-radius: 3px; padding: 0 2px; transition: color 0.16s ease-out, background-color 0.16s ease-out, box-shadow 0.16s ease-out; font-size: 12px; line-height: 1.4; flex-shrink: 0; }',
+      '.rating-hub-score { display: inline-flex; align-items: center; gap: 1px; color: #2f2f2f; font-variant-numeric: tabular-nums; min-width: 3.75em; letter-spacing: 0.01em; line-height: 1.4; }',
       '.rating-hub-score-main { font-weight: 700; color: #2f2f2f; }',
       '.rating-hub-score-suffix { font-size: 11px; font-weight: 500; color: #8f8f8f; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
@@ -1394,16 +1394,16 @@
   sources.push({
     key: 'bangumi',
     label: 'Bangumi',
-    version: 1,
+    version: 2,
     types: ['movie'],
     requiredConfig: null,
     channels: [{ channelKey: 'bangumi', label: 'Bangumi', icon: 'https://bgm.tv/img/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        // Search: https://api.bgm.tv/search/subject/{keyword}?type=2&responseGroup=small
-        // type=2 → anime; MUST send User-Agent header (otherwise 403)
+        // Search: https://api.bgm.tv/search/subject/{keyword}?type=2&responseGroup=large
+        // type=2 → anime; responseGroup=large 才返回 rating; MUST send User-Agent
         const keyword = encodeURIComponent(meta.title || '');
-        const apiUrl = 'https://api.bgm.tv/search/subject/' + keyword + '?type=2&responseGroup=small';
+        const apiUrl = 'https://api.bgm.tv/search/subject/' + keyword + '?type=2&responseGroup=large';
 
         function noMatch() {
           resolve({ bangumi: { channelKey: 'bangumi', status: 'no_match' } });
