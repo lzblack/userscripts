@@ -1083,11 +1083,17 @@
             const audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
             if (criticsMatch) criticsScore = parseInt(criticsMatch[1], 10);
             if (audienceMatch) audienceScore = parseInt(audienceMatch[1], 10);
-            // 评论数量
-            const criticsCountMatch = html.match(/"criticsNumReviews"\s*:\s*(\d+)/);
-            const audienceCountMatch = html.match(/"audienceNumReviews"\s*:\s*"?([\d,]+)"?/);
-            if (criticsCountMatch) criticsCount = parseInt(criticsCountMatch[1], 10);
-            if (audienceCountMatch) audienceCount = parseInt(audienceCountMatch[1].replace(/,/g, ''), 10);
+            // 评论数量：从 criticsScore/audienceScore JSON 对象中提取 reviewCount
+            const criticsObj = html.match(/"criticsScore"\s*:\s*\{[^}]+\}/);
+            const audienceObj = html.match(/"audienceScore"\s*:\s*\{[^}]+\}/);
+            if (criticsObj) {
+              const cm = criticsObj[0].match(/"reviewCount"\s*:\s*(\d+)/);
+              if (cm) criticsCount = parseInt(cm[1], 10);
+            }
+            if (audienceObj) {
+              const am = audienceObj[0].match(/"reviewCount"\s*:\s*(\d+)/);
+              if (am) audienceCount = parseInt(am[1], 10);
+            }
 
             // Method B: DOM selectors fallback
             if (criticsScore == null || audienceScore == null) {
@@ -2001,7 +2007,7 @@
                 status: 'success',
                 score: pct,
                 scoreMax: 100,
-                displayValue: pct + '% ' + desc,
+                displayValue: pct + '%',
                 count: total,
                 countText: total.toLocaleString(),
                 url: storeUrl,
