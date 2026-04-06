@@ -594,7 +594,16 @@
       // error (and any unknown status)
       const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
-      statusEl.textContent = '加载失败';
+      if (result.url) {
+        const errLink = document.createElement('a');
+        errLink.href = result.url;
+        errLink.target = '_blank';
+        errLink.rel = 'noopener noreferrer';
+        errLink.textContent = '点击查看';
+        statusEl.appendChild(errLink);
+      } else {
+        statusEl.textContent = '加载失败';
+      }
       row.appendChild(statusEl);
     }
   }
@@ -2100,6 +2109,26 @@
     fetchAll(applicable, meta, config, function (channelKey, result) {
       fillSlot(channelKey, result);
     });
+
+    // 将豆瓣页面上的 IMDb ID 纯文本变成可点击的链接
+    if (meta.imdbId) {
+      const infoEl = document.querySelector('#info');
+      if (infoEl) {
+        const walker = document.createTreeWalker(infoEl, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          if (node.textContent.includes(meta.imdbId)) {
+            const span = document.createElement('span');
+            span.innerHTML = node.textContent.replace(
+              meta.imdbId,
+              '<a href="https://www.imdb.com/title/' + meta.imdbId + '/" target="_blank" rel="noopener" style="color:#37a;">' + meta.imdbId + '</a>'
+            );
+            node.parentNode.replaceChild(span, node);
+            break;
+          }
+        }
+      }
+    }
 
     deps.log('Initialized for', meta.type, ':', meta.title);
   }
