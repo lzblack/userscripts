@@ -618,16 +618,17 @@
       // error (and any unknown status)
       const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
+      // Label → 链接（如果有 url）
       if (result.url) {
-        const errLink = document.createElement('a');
-        errLink.href = result.url;
-        errLink.target = '_blank';
-        errLink.rel = 'noopener noreferrer';
-        errLink.textContent = '查看 →';
-        statusEl.appendChild(errLink);
-      } else {
-        statusEl.textContent = '加载失败';
+        const a = document.createElement('a');
+        a.className = 'rating-hub-label';
+        a.href = result.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.innerHTML = label.innerHTML;
+        row.replaceChild(a, label);
       }
+      statusEl.textContent = '网络受限';
       row.appendChild(statusEl);
     }
   }
