@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         豆瓣读书版本标记提示
 // @namespace    https://github.com/lzblack
-// @version      1.0.0
+// @version      1.0.1
 // @author       lzblack
 // @description  在豆瓣读书条目页提示你标记过同一作品的其他版本
 // @match        https://book.douban.com/subject/*
 // @icon         https://img3.doubanio.com/favicon.ico
+// @icon64       https://img3.doubanio.com/favicon.ico
 // @grant        none
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-book-version-marker/douban-book-version-marker.user.js

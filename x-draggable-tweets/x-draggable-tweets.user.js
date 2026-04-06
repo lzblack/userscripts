@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         X.com Draggable Tweets
 // @namespace    https://github.com/lzblack
-// @version      1.0.0
+// @version      1.0.1
 // @author       lzblack
 // @description  Make entire tweet cards draggable as real links (works with Glitter Drag)
 // @match        https://x.com/*
 // @match        https://twitter.com/*
+// @icon         https://abs.twimg.com/favicons/twitter.3.ico
+// @icon64       https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png
 // @grant        none
 // @license      MIT
 // @run-at       document-idle
