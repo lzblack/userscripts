@@ -26,7 +26,7 @@
 ## 安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 从 [GreasyFork](链接待定) 安装脚本
+2. 从 [GreasyFork](https://greasyfork.org/zh-CN/scripts/572796) 安装脚本
 
 ## 配置
 
