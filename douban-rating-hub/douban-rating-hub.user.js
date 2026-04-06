@@ -632,7 +632,7 @@
 
   // --- IMDB ---
   sources.push({
-    key: 'imdb', label: 'IMDB', version: 2,
+    key: 'imdb', label: 'IMDB', version: 3,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -646,12 +646,6 @@
         deps.request(itemUrl).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) {
             resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
-            return;
-          }
-          // IMDB 使用 AWS WAF 防护，未通过验证时返回 202 + 短小的 JS 挑战页
-          if (resp.status === 202 || resp.responseText.length < 10000 || resp.responseText.indexOf('AwsWafIntegration') !== -1) {
-            deps.log('IMDB WAF challenge detected, cannot scrape');
-            resolve({ imdb: { channelKey: 'imdb', status: 'error', error: 'WAF challenge', url: itemUrl } });
             return;
           }
           const doc = deps.parseHTML(resp.responseText);
