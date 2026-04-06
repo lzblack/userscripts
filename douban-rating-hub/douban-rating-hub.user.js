@@ -683,7 +683,6 @@
             resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
             return;
           }
-          deps.log('IMDB response:', 'status=' + resp.status, 'length=' + resp.responseText.length, 'has-ldjson=' + resp.responseText.includes('application/ld+json'));
           const doc = deps.parseHTML(resp.responseText);
           // Parse LD+JSON for aggregateRating
           const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
