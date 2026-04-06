@@ -477,7 +477,7 @@
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
       '.rating-hub-row { display: flex; align-items: center; gap: 4px; line-height: 2; white-space: nowrap; }',
       '.rating-hub-label { color: #37a; text-decoration: none; width: 90px; flex-shrink: 0; border-radius: 3px; padding: 0 2px; transition: color 0.2s, background-color 0.2s; font-size: 12px; }',
-      '.rating-hub-score { font-weight: bold; color: #333; min-width: 50px; }',
+      '.rating-hub-score { font-weight: bold; color: #333; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
@@ -2138,6 +2138,9 @@
   // ============================================================
 
   function init() {
+    // 防止重复初始化
+    if (document.querySelector('[data-rating-hub]')) return;
+
     const meta = extractMeta();
     if (meta.type === 'unknown' || !meta.doubanId) return;
 
