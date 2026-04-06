@@ -431,7 +431,7 @@
     style.id = 'rating-hub-style';
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
-      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; }',
+      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; }',
       '.rating-hub-label { color: #37a; text-decoration: none; min-width: 90px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
@@ -782,7 +782,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 1,
+    key: 'metacritic', label: 'Metacritic', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic' }],
     fetch: function (meta, deps) {
@@ -1419,7 +1419,7 @@
               scoreMax: 100,
               displayValue: percentage.toFixed(1) + '%',
               count: count || null,
-              countText: count ? count.toLocaleString() + '人点评' : null,
+              countText: count ? count.toLocaleString() : null,
               url: searchPageUrl,
               matchedBy: 'title',
               matchConfidence: 'fuzzy',
@@ -1435,7 +1435,7 @@
   sources.push({
     key: 'neodb',
     label: 'NeoDB',
-    version: 1,
+    version: 2,
     types: ['book', 'movie', 'music', 'game'],
     requiredConfig: null,
     channels: [{ channelKey: 'neodb', label: 'NeoDB' }],
@@ -1512,7 +1512,7 @@
             var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
             if (cm) count = parseInt(cm[1], 10);
           }
-          return { found: true, hasRating: count > 0, score: score, count: count, url: url };
+          return { found: true, hasRating: score > 0, score: score, count: count, url: url };
         }
 
         function buildResult(parsed, matchedBy, confidence) {
