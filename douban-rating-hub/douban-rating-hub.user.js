@@ -1026,8 +1026,8 @@
 
         // THIRD FALLBACK: search by title
         function tryTitleSearch() {
-          // Letterboxd 只有英文内容，用 originalTitle；纯中文标题不搜
-          const searchTitle = meta.originalTitle || meta.title || '';
+          // Letterboxd 只有英文内容，用 originalTitle 去掉季数
+          const searchTitle = stripSeason(meta.originalTitle || meta.title || '');
           if (!/[a-zA-Z]/.test(searchTitle)) {
             resolve(noMatch());
             return;
