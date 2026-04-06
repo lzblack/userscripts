@@ -23,6 +23,7 @@
 // @connect      api.bgm.tv
 // @connect      api.jikan.moe
 // @connect      api.discogs.com
+// @connect      store.steampowered.com
 // @connect      itunes.apple.com
 // @connect      podcasts.apple.com
 // @connect      xyzrank.eddiehe.top
@@ -642,7 +643,10 @@
       '.rating-hub-row[data-status="loading"] .rating-hub-status, .rating-hub-row[data-status="no_match"] .rating-hub-status, .rating-hub-row[data-status="no_rating"] .rating-hub-status { color: #777; }',
       '.rating-hub-row[data-status="rate_limited"] .rating-hub-status, .rating-hub-row[data-status="error"] .rating-hub-status { color: #7a6a55; }',
       '.rating-hub-row[data-status="disabled"] .rating-hub-status { color: #666; }',
+      '.rating-hub-row-hidden { display: none; }',
       '.rating-hub-icon { width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; border-radius: 2px; flex-shrink: 0; }',
+      '.rating-hub-toggle { display: inline-block; margin-top: 4px; color: #37a; text-decoration: none; font-size: 12px; line-height: 1.4; }',
+      '.rating-hub-toggle:hover { text-decoration: underline; }',
       '.rh-config-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.28); z-index: 999999; }',
       '.rh-config-panel { width: min(520px, calc(100vw - 24px)); max-height: min(78vh, 720px); overflow: auto; background: #fff; color: #333; border: 1px solid #d8d2c4; border-radius: 8px; box-shadow: 0 14px 34px rgba(26, 26, 26, 0.16); padding: 20px 22px 18px; font: 13px/1.65 Helvetica, Arial, sans-serif; }',
       '.rh-config-title { margin: 0; font-size: 16px; font-weight: 700; color: #494949; }',
@@ -676,7 +680,22 @@
     document.head.appendChild(style);
   }
 
-  function createSlots(channels) {
+  function getCollapsedChannelKeys(channels, meta) {
+    if (!channels || channels.length <= 7) return [];
+    if (meta.type !== 'movie' && meta.type !== 'drama') return [];
+
+    const isAnime = meta.type === 'movie' && meta.genres && meta.genres.indexOf('动画') !== -1;
+    const visibleKeys = isAnime
+      ? ['imdb', 'rt_critics', 'rt_audience', 'letterboxd', 'bangumi', 'mal', 'neodb']
+      : ['imdb', 'rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'tmdb', 'neodb'];
+    const visibleSet = new Set(visibleKeys);
+
+    return channels
+      .filter(function (ch) { return !visibleSet.has(ch.channelKey); })
+      .map(function (ch) { return ch.channelKey; });
+  }
+
+  function createSlots(channels, meta) {
     const anchor = document.querySelector('#interest_sectl')
       || document.querySelector('.drama-info .meta .rating')  // 话剧：评分区块后
       || document.querySelector('.drama-info .meta')           // 话剧：meta 容器
@@ -687,12 +706,16 @@
     const container = document.createElement('div');
     container.className = 'rating-hub-container';
     container.setAttribute('data-rating-hub', '1');
+    const collapsedKeys = new Set(getCollapsedChannelKeys(channels, meta));
 
     channels.forEach(function (ch) {
       const row = document.createElement('div');
       row.className = 'rating-hub-row';
       row.setAttribute('data-channel', ch.channelKey);
       row.setAttribute('data-status', 'loading');
+      if (collapsedKeys.has(ch.channelKey)) {
+        row.classList.add('rating-hub-row-hidden');
+      }
 
       const label = document.createElement('span');
       label.className = 'rating-hub-label no-link';
@@ -714,6 +737,28 @@
       row.appendChild(status);
       container.appendChild(row);
     });
+
+    if (collapsedKeys.size > 0) {
+      const toggle = document.createElement('a');
+      toggle.href = '#';
+      toggle.className = 'rating-hub-toggle';
+      toggle.setAttribute('data-expanded', '0');
+      toggle.textContent = '展开更多评分来源（' + collapsedKeys.size + '）';
+      toggle.addEventListener('click', function (e) {
+        e.preventDefault();
+        const expanded = toggle.getAttribute('data-expanded') === '1';
+        collapsedKeys.forEach(function (key) {
+          const hiddenRow = container.querySelector('.rating-hub-row[data-channel="' + key + '"]');
+          if (!hiddenRow) return;
+          hiddenRow.classList.toggle('rating-hub-row-hidden', expanded);
+        });
+        toggle.setAttribute('data-expanded', expanded ? '0' : '1');
+        toggle.textContent = expanded
+          ? '展开更多评分来源（' + collapsedKeys.size + '）'
+          : '收起更多评分来源';
+      });
+      container.appendChild(toggle);
+    }
 
     anchor.appendChild(container);
     return container;
@@ -1881,6 +1926,89 @@
     },
   });
 
+  // --- Steam ---
+  sources.push({
+    key: 'steam',
+    label: 'Steam',
+    version: 1,
+    types: ['game'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'steam', label: 'Steam', icon: 'https://store.steampowered.com/favicon.ico' }],
+    fetch: function (meta, deps) {
+      // Use English title for search (Steam search works best with English)
+      const query = stripSeason(meta.originalTitle || meta.title || '');
+      const searchUrl = 'https://store.steampowered.com/api/storesearch/?term=' + encodeURIComponent(query) + '&cc=us&l=english';
+
+      return new Promise(function (resolve) {
+        function noMatch() {
+          resolve({ steam: { channelKey: 'steam', status: 'no_match', url: 'https://store.steampowered.com/search/?term=' + encodeURIComponent(meta.title || '') } });
+        }
+
+        deps.request(searchUrl).then(function (resp) {
+          if (resp.status !== 200) { noMatch(); return; }
+          const data = JSON.parse(resp.responseText);
+          if (!data.items || data.items.length === 0) { noMatch(); return; }
+
+          // Title match: normalize and compare
+          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+          const queryNorm = normalize(query);
+          let bestItem = null;
+          for (let i = 0; i < Math.min(data.items.length, 10); i++) {
+            if (normalize(data.items[i].name) === queryNorm) {
+              bestItem = data.items[i];
+              break;
+            }
+          }
+          // Fallback to first result if no exact match
+          if (!bestItem) bestItem = data.items[0];
+
+          const appId = bestItem.id;
+          const storeUrl = 'https://store.steampowered.com/app/' + appId + '/';
+
+          // Fetch review summary
+          const reviewUrl = 'https://store.steampowered.com/appreviews/' + appId + '?json=1&language=all&purchase_type=all&num_per_page=0';
+          deps.request(reviewUrl).then(function (reviewResp) {
+            if (reviewResp.status !== 200) {
+              resolve({ steam: { channelKey: 'steam', status: 'no_rating', url: storeUrl } });
+              return;
+            }
+            const reviewData = JSON.parse(reviewResp.responseText);
+            const summary = reviewData.query_summary;
+            if (!summary || summary.total_reviews === 0) {
+              resolve({ steam: { channelKey: 'steam', status: 'no_rating', url: storeUrl } });
+              return;
+            }
+
+            // Calculate positive percentage
+            const positive = summary.total_positive || 0;
+            const total = summary.total_reviews || 0;
+            const pct = Math.round(positive / total * 100);
+            // review_score_desc: "Overwhelmingly Positive", "Very Positive", "Positive", "Mostly Positive", "Mixed", etc.
+            const desc = summary.review_score_desc || '';
+
+            resolve({
+              steam: {
+                channelKey: 'steam',
+                status: 'success',
+                score: pct,
+                scoreMax: 100,
+                displayValue: pct + '% ' + desc,
+                count: total,
+                countText: total.toLocaleString(),
+                url: storeUrl,
+                matchedBy: normalize(bestItem.name) === queryNorm ? 'title' : 'search_first',
+                matchConfidence: normalize(bestItem.name) === queryNorm ? 'high' : 'fuzzy',
+                externalId: String(appId),
+              },
+            });
+          }).catch(function () {
+            resolve({ steam: { channelKey: 'steam', status: 'no_rating', url: storeUrl } });
+          });
+        }).catch(function () { noMatch(); });
+      });
+    },
+  });
+
   // --- Apple Podcasts ---
   sources.push({
     key: 'apple_podcasts',
@@ -2359,7 +2487,7 @@
 
     ensureStyles();
     evictStale();
-    createSlots(allChannels);
+    createSlots(allChannels, meta);
     fetchAll(applicable, meta, config, function (channelKey, result) {
       fillSlot(channelKey, result);
     });
