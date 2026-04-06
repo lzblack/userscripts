@@ -142,12 +142,15 @@
     const isbnMatch = infoText.match(/ISBN:\s*([\dXx-]+)/);
     if (isbnMatch) isbn = isbnMatch[1].replace(/-/g, '');
 
-    // 原作名 → 又名 → 从 h1 混合标题中提取英文部分
+    // 英文标题提取：多层 fallback
     let originalTitle = null;
+    // 1. #info 原作名
     const originalTitleMatch = infoText.match(/原作名:\s*(.+)/);
     if (originalTitleMatch) {
       originalTitle = originalTitleMatch[1].trim();
-    } else {
+    }
+    // 2. #info 又名（取第一个纯 ASCII 项）
+    if (!originalTitle) {
       const alsoKnownMatch = infoText.match(/又名:\s*(.+)/);
       if (alsoKnownMatch) {
         const candidates = alsoKnownMatch[1].split(/\s*\/\s*/);
@@ -155,9 +158,21 @@
         if (englishName) originalTitle = englishName.trim();
       }
     }
-    // 最终 fallback：从 h1 标题中提取连续英文部分（如 "路易不容易 第一季 Louie Season 1"）
+    // 3. h1 span[property="v:itemreviewed"] 去掉中文标题得到英文部分
+    //    （参考：豆瓣资源下载大师的方法）
+    if (!originalTitle) {
+      const reviewedEl = document.querySelector('#content h1 span[property="v:itemreviewed"]');
+      if (reviewedEl) {
+        // 完整标题如 "路易不容易 第一季 Louie Season 1"，去掉中文部分
+        const fullText = reviewedEl.textContent.trim();
+        // 提取连续英文段（含数字、空格、常见标点）
+        const engMatch = fullText.match(/([A-Za-z][A-Za-z0-9 :&'.,-]{2,})/);
+        if (engMatch) originalTitle = engMatch[1].trim();
+      }
+    }
+    // 4. 最终 fallback：直接从 title 变量提取英文段
     if (!originalTitle && title) {
-      const engMatch = title.match(/([A-Za-z][A-Za-z0-9 :&'.-]{2,})/);
+      const engMatch = title.match(/([A-Za-z][A-Za-z0-9 :&'.,-]{2,})/);
       if (engMatch) originalTitle = engMatch[1].trim();
     }
 
