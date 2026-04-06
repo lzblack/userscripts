@@ -456,6 +456,7 @@
       '.rating-hub-status { color: #999; }',
       '.rating-hub-status a { color: #37a; text-decoration: none; }',
       '.rating-hub-status a:hover { text-decoration: underline; }',
+      '.rating-hub-icon { width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -475,7 +476,15 @@
 
       var label = document.createElement('span');
       label.className = 'rating-hub-label no-link';
-      label.textContent = ch.label;
+      if (ch.icon) {
+        var iconImg = document.createElement('img');
+        iconImg.className = 'rating-hub-icon';
+        iconImg.src = ch.icon;
+        iconImg.alt = '';
+        iconImg.onerror = function () { this.style.display = 'none'; };
+        label.appendChild(iconImg);
+      }
+      label.appendChild(document.createTextNode(ch.label));
 
       var status = document.createElement('span');
       status.className = 'rating-hub-status';
@@ -511,7 +520,7 @@
       a.href = result.url;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
-      a.textContent = label.textContent;
+      a.innerHTML = label.innerHTML; // preserves icon img + text
       row.replaceChild(a, label);
 
       var scoreEl = document.createElement('span');
@@ -533,7 +542,7 @@
         a.href = result.url;
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
-        a.textContent = label.textContent;
+        a.innerHTML = label.innerHTML; // preserves icon img + text
         row.replaceChild(a, label);
       }
 
@@ -602,7 +611,7 @@
   sources.push({
     key: 'imdb', label: 'IMDB', version: 1,
     types: ['movie'], requiredConfig: null,
-    channels: [{ channelKey: 'imdb', label: 'IMDB' }],
+    channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         var searchUrl = 'https://www.imdb.com/search/title/?title=' + encodeURIComponent(meta.title || '');
@@ -670,8 +679,8 @@
     key: 'rottentomatoes', label: 'Rotten Tomatoes', version: 1,
     types: ['movie'], requiredConfig: null,
     channels: [
-      { channelKey: 'rt_critics', label: 'RT Critics' },
-      { channelKey: 'rt_audience', label: 'RT Audience' },
+      { channelKey: 'rt_critics', label: 'RT Critics', icon: 'https://www.rottentomatoes.com/favicon.ico' },
+      { channelKey: 'rt_audience', label: 'RT Audience', icon: 'https://www.rottentomatoes.com/favicon.ico' },
     ],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
@@ -799,7 +808,7 @@
   sources.push({
     key: 'metacritic', label: 'Metacritic', version: 2,
     types: ['movie'], requiredConfig: null,
-    channels: [{ channelKey: 'metacritic', label: 'Metacritic' }],
+    channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         var titleForSlug = meta.originalTitle || meta.title || '';
@@ -866,7 +875,7 @@
   sources.push({
     key: 'letterboxd', label: 'Letterboxd', version: 1,
     types: ['movie'], requiredConfig: null,
-    channels: [{ channelKey: 'letterboxd', label: 'Letterboxd' }],
+    channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         var searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
@@ -979,7 +988,7 @@
     key: 'tmdb', label: 'TMDB', version: 1,
     types: ['movie'],
     requiredConfig: ['tmdbApiKey'],
-    channels: [{ channelKey: 'tmdb', label: 'TMDB' }],
+    channels: [{ channelKey: 'tmdb', label: 'TMDB', icon: 'https://www.themoviedb.org/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         var config = readConfig();
@@ -1070,7 +1079,7 @@
     version: 1,
     types: ['movie'],
     requiredConfig: null,
-    channels: [{ channelKey: 'bangumi', label: 'Bangumi' }],
+    channels: [{ channelKey: 'bangumi', label: 'Bangumi', icon: 'https://bgm.tv/img/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Search: https://api.bgm.tv/search/subject/{keyword}?type=2&responseGroup=small
@@ -1136,7 +1145,7 @@
     version: 1,
     types: ['movie'],
     requiredConfig: null,
-    channels: [{ channelKey: 'mal', label: 'MAL' }],
+    channels: [{ channelKey: 'mal', label: 'MAL', icon: 'https://cdn.myanimelist.net/images/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Search: https://api.jikan.moe/v4/anime?q={title}&limit=3
@@ -1189,7 +1198,7 @@
   sources.push({
     key: 'goodreads', label: 'Goodreads', version: 1,
     types: ['book'], requiredConfig: null,
-    channels: [{ channelKey: 'goodreads', label: 'Goodreads' }],
+    channels: [{ channelKey: 'goodreads', label: 'Goodreads', icon: 'https://www.goodreads.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Query cascade: ISBN → originalTitle → title
@@ -1285,7 +1294,7 @@
   sources.push({
     key: 'amazon', label: 'Amazon', version: 1,
     types: ['book'], requiredConfig: null,
-    channels: [{ channelKey: 'amazon', label: 'Amazon' }],
+    channels: [{ channelKey: 'amazon', label: 'Amazon', icon: 'https://www.amazon.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Query cascade: ISBN → originalTitle+creator → title+creator
@@ -1408,7 +1417,7 @@
   sources.push({
     key: 'weread', label: '微信读书', version: 1,
     types: ['book'], requiredConfig: null,
-    channels: [{ channelKey: 'weread', label: '微信读书' }],
+    channels: [{ channelKey: 'weread', label: '微信读书', icon: 'https://weread.qq.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         var title = meta.title || '';
@@ -1496,7 +1505,7 @@
     version: 1,
     types: ['music'],
     requiredConfig: null,
-    channels: [{ channelKey: 'discogs', label: 'Discogs' }],
+    channels: [{ channelKey: 'discogs', label: 'Discogs', icon: 'https://www.discogs.com/favicon.ico' }],
     fetch: function (meta, deps) {
       var query = meta.originalTitle || meta.title;
       if (meta.creator) query += ' ' + meta.creator;
@@ -1562,7 +1571,7 @@
     version: 1,
     types: ['podcast'],
     requiredConfig: null,
-    channels: [{ channelKey: 'apple_podcasts', label: 'Apple Podcasts' }],
+    channels: [{ channelKey: 'apple_podcasts', label: 'Apple Podcasts', icon: 'https://podcasts.apple.com/favicon.ico' }],
     fetch: function (meta, deps) {
       var searchUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(meta.title) + '&media=podcast&country=us&limit=5';
 
@@ -1661,7 +1670,7 @@
     version: 2,
     types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
-    channels: [{ channelKey: 'neodb', label: 'NeoDB' }],
+    channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // 分类映射：music → album
