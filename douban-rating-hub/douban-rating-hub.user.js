@@ -267,8 +267,10 @@
   const CACHE_TTL_NEGATIVE = 24 * 60 * 60 * 1000;        // 1 天
   const CACHE_TTL_RATE_LIMITED = 5 * 60 * 1000;           // 5 分钟
 
+  const CACHE_PREFIX = 'rh2:';
+
   function cacheKey(doubanId, channelKey, sourceVersion) {
-    return 'rh:' + doubanId + ':' + channelKey + ':' + sourceVersion;
+    return CACHE_PREFIX + doubanId + ':' + channelKey + ':' + sourceVersion;
   }
 
   function getCache(doubanId, channelKey, sourceVersion) {
@@ -308,8 +310,8 @@
     let removed = 0;
     const now = Date.now();
     keys.forEach(function (key) {
-      if (!key.startsWith('rh:')) return;
-      // 跳过配置键和冷却键
+      // 清理新旧前缀的缓存条目，跳过配置键和冷却键
+      if (!key.startsWith('rh:') && !key.startsWith('rh2:')) return;
       if (key === 'rh:config' || key.startsWith('rh:cooldown:')) return;
 
       const entry = deps.storage.get(key);
@@ -987,7 +989,7 @@
           });
         }
 
-        function buildResults(criticsScore, audienceScore, movieUrl) {
+        function buildResults(criticsScore, audienceScore, criticsCount, audienceCount, movieUrl) {
           const results = {};
           if (criticsScore != null && !isNaN(criticsScore)) {
             results.rt_critics = {
@@ -996,8 +998,8 @@
               score: criticsScore,
               scoreMax: 100,
               displayValue: criticsScore + '%',
-              count: null,
-              countText: null,
+              count: criticsCount || null,
+              countText: criticsCount ? criticsCount.toLocaleString() : null,
               url: movieUrl,
               matchedBy: 'english_title',
               matchConfidence: matchConfidence,
@@ -1013,8 +1015,8 @@
               score: audienceScore,
               scoreMax: 100,
               displayValue: audienceScore + '%',
-              count: null,
-              countText: null,
+              count: audienceCount || null,
+              countText: audienceCount ? audienceCount.toLocaleString() : null,
               url: movieUrl,
               matchedBy: 'english_title',
               matchConfidence: matchConfidence,
@@ -1073,12 +1075,19 @@
             const html = movieResp.responseText;
             let criticsScore = null;
             let audienceScore = null;
+            let criticsCount = null;
+            let audienceCount = null;
 
             // Method A: JSON in <script type="application/json"> tags
             const criticsMatch = html.match(/"criticsScore"\s*:\s*(\d+)/);
             const audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
             if (criticsMatch) criticsScore = parseInt(criticsMatch[1], 10);
             if (audienceMatch) audienceScore = parseInt(audienceMatch[1], 10);
+            // 评论数量
+            const criticsCountMatch = html.match(/"criticsNumReviews"\s*:\s*(\d+)/);
+            const audienceCountMatch = html.match(/"audienceNumReviews"\s*:\s*"?([\d,]+)"?/);
+            if (criticsCountMatch) criticsCount = parseInt(criticsCountMatch[1], 10);
+            if (audienceCountMatch) audienceCount = parseInt(audienceCountMatch[1].replace(/,/g, ''), 10);
 
             // Method B: DOM selectors fallback
             if (criticsScore == null || audienceScore == null) {
@@ -1099,7 +1108,7 @@
               }
             }
 
-            resolve(buildResults(criticsScore, audienceScore, movieUrl));
+            resolve(buildResults(criticsScore, audienceScore, criticsCount, audienceCount, movieUrl));
           }).catch(function () {
             noMatchBoth();
           });
