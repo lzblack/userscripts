@@ -472,6 +472,8 @@
 
   function createSlots(channels) {
     const anchor = document.querySelector('#interest_sectl')
+      || document.querySelector('.drama-info .meta .rating')  // 话剧：评分区块后
+      || document.querySelector('.drama-info .meta')           // 话剧：meta 容器
       || document.querySelector('#interest_sect_level')
       || document.querySelector('#wrapper');
     if (!anchor) return null;
@@ -1684,8 +1686,8 @@
     channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/s/img/icon.png' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        // 分类映射：music → album
-        const categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game', drama: 'performance', podcast: 'podcast' };
+        // 分类映射：music → album；podcast/drama 用 'all' 避免 category 过滤导致空结果
+        const categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game', drama: 'all', podcast: 'all' };
         const category = categoryMap[meta.type] || 'all';
 
         // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
@@ -1823,9 +1825,15 @@
             }
             // 情况二：搜索列表页，找第一个结果卡片
             const doc = deps.parseHTML(resp.responseText);
-            const card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
-            if (!card) { tryQuery(queryIndex + 1); return; }
-            const linkEl = card.querySelector('.title a') || card.querySelector('a');
+            let card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
+            let linkEl = card ? (card.querySelector('.title a') || card.querySelector('a')) : null;
+            // 回退：podcast/drama 等页面使用不同 class，直接找详情页链接
+            if (!linkEl) {
+              const detailLinks = doc.querySelectorAll(
+                'a[href*="/podcast/"], a[href*="/performance/"], a[href*="/book/"], a[href*="/movie/"], a[href*="/album/"], a[href*="/game/"], a[href*="/tv/"]'
+              );
+              if (detailLinks.length > 0) linkEl = detailLinks[0];
+            }
             if (!linkEl) { tryQuery(queryIndex + 1); return; }
             const href = linkEl.getAttribute('href') || '';
             const detailUrl = href.startsWith('http') ? href : 'https://neodb.social' + href;
