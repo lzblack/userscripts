@@ -676,7 +676,9 @@
           return;
         }
         const itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
-        deps.request(itemUrl).then(function (resp) {
+        deps.request(itemUrl, {
+          headers: { 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.9' }
+        }).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) {
             resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
             return;
