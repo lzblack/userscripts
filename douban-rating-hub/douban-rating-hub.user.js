@@ -456,7 +456,7 @@
     style.id = 'rating-hub-style';
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
-      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; flex-wrap: nowrap; }',
+      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; }',
       '.rating-hub-label { color: #37a; text-decoration: none; min-width: 110px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
@@ -1801,7 +1801,7 @@
   sources.push({
     key: 'neodb',
     label: 'NeoDB',
-    version: 4,
+    version: 5,
     types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/s/img/icon.png' }],
@@ -1811,20 +1811,24 @@
         const categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game', drama: 'all', podcast: 'all' };
         const category = categoryMap[meta.type] || 'all';
 
-        // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
-        const doubanUrl = location.href.split('?')[0].split('#')[0];
-        const queries = [doubanUrl];
+        // 搜索查询瀑布
+        const queries = [];
+        // podcast/drama: NeoDB 不索引豆瓣播客/舞台剧 URL，跳过 URL 查询
+        if (meta.type !== 'podcast' && meta.type !== 'drama') {
+          const doubanUrl = location.href.split('?')[0].split('#')[0];
+          queries.push(doubanUrl);
+        }
         if (meta.originalTitle && meta.originalTitle !== meta.title) {
           queries.push(meta.originalTitle);
         }
         if (meta.title) {
-          queries.push(meta.title);
-          // 对含分隔符的标题（如 "半拿铁 | 商业沉浮录"），也尝试第一段作为查询
-          const parts = meta.title.split(/[|｜\/]/);
+          // 对含分隔符的标题（如 "半拿铁 | 商业沉浮录"），先试短标题
+          const parts = meta.title.split(/[|｜]/);
           if (parts.length > 1) {
             const shortTitle = parts[0].trim();
-            if (shortTitle && shortTitle !== meta.title) queries.push(shortTitle);
+            if (shortTitle) queries.push(shortTitle);
           }
+          queries.push(meta.title);
         }
 
         // 匹配 NeoDB 条目详情页路径
