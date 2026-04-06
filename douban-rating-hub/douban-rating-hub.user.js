@@ -11,6 +11,7 @@
 // @match        https://www.douban.com/location/drama/*
 // @match        https://www.douban.com/podcast/*
 // @connect      imdb.com
+// @connect      p.media-imdb.com
 // @connect      rottentomatoes.com
 // @connect      backend.metacritic.com
 // @connect      letterboxd.com
@@ -666,68 +667,54 @@
 
   // --- IMDB ---
   sources.push({
-    key: 'imdb', label: 'IMDB', version: 3,
+    key: 'imdb', label: 'IMDB', version: 4,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        const searchUrl = 'https://www.imdb.com/search/title/?title=' + encodeURIComponent(meta.title || '');
         if (!meta.imdbId) {
-          resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: searchUrl } });
+          resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: 'https://www.imdb.com/search/title/?title=' + encodeURIComponent(meta.title || '') } });
           return;
         }
         const itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
-        deps.request(itemUrl, {
-          headers: { 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.9' }
-        }).then(function (resp) {
+        // 使用 IMDB 评分 JSON 端点（无 WAF 拦截）
+        const ratingsUrl = 'https://p.media-imdb.com/static-content/documents/v1/title/' + meta.imdbId + '/ratings%3Fjsonp=imdb.rating.run:imdb.api.title.ratings/data.json';
+        deps.request(ratingsUrl).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) {
-            resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
+            resolve({ imdb: { channelKey: 'imdb', status: 'error', url: itemUrl } });
             return;
           }
-          const doc = deps.parseHTML(resp.responseText);
-          // Parse LD+JSON for aggregateRating
-          const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (let i = 0; i < scripts.length; i++) {
-            try {
-              const data = JSON.parse(scripts[i].textContent);
-              const ar = data.aggregateRating;
-              if (ar && ar.ratingValue != null) {
-                const score = parseFloat(ar.ratingValue);
-                const count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
-                if (isNaN(score)) continue;
-                if (count === 0) {
-                  resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
-                  return;
-                }
-                resolve({
-                  imdb: {
-                    channelKey: 'imdb',
-                    status: 'success',
-                    score: score,
-                    scoreMax: 10,
-                    displayValue: score.toFixed(1) + '/10',
-                    count: count,
-                    countText: count.toLocaleString(),
-                    url: itemUrl,
-                    matchedBy: 'imdb_id',
-                    matchConfidence: 'exact',
-                    externalId: meta.imdbId,
-                  },
-                });
-                return;
-              }
-            } catch (e) { /* skip */ }
-          }
-          // 没找到 aggregateRating — 区分"真的没评分"和"页面没正常加载"
-          // 正常 IMDB 页面 >100KB；WAF 挑战页 <10KB
-          if (scripts.length === 0 || resp.responseText.length < 50000) {
-            // 页面可能被 WAF 拦截，显示链接而非误导性的"暂无评分"
-            resolve({ imdb: { channelKey: 'imdb', status: 'error', error: 'page incomplete', url: itemUrl } });
-          } else {
-            resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
+          try {
+            // JSONP 格式：imdb.rating.run({...})，去掉包装
+            const jsonText = resp.responseText.replace(/^[^(]+\(/, '').replace(/\)\s*$/, '');
+            const data = JSON.parse(jsonText);
+            const res = data.resource || data;
+            const score = parseFloat(res.rating);
+            const count = parseInt(res.ratingCount, 10) || 0;
+            if (isNaN(score) || score === 0) {
+              resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
+              return;
+            }
+            resolve({
+              imdb: {
+                channelKey: 'imdb',
+                status: 'success',
+                score: score,
+                scoreMax: 10,
+                displayValue: score.toFixed(1) + '/10',
+                count: count,
+                countText: count.toLocaleString(),
+                url: itemUrl,
+                matchedBy: 'imdb_id',
+                matchConfidence: 'exact',
+                externalId: meta.imdbId,
+              },
+            });
+          } catch (e) {
+            resolve({ imdb: { channelKey: 'imdb', status: 'error', error: e.message, url: itemUrl } });
           }
         }).catch(function () {
-          resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
+          resolve({ imdb: { channelKey: 'imdb', status: 'error', url: itemUrl } });
         });
       });
     },
