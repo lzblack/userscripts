@@ -2189,7 +2189,7 @@
       }
     }
 
-    deps.log('Initialized for', meta.type, ':', meta.title);
+    deps.log('Initialized for', meta.type, ':', meta.title, '| EN:', meta.originalTitle || '(none)', '| IMDB:', meta.imdbId || '(none)');
   }
 
   // DOM 就绪后执行
