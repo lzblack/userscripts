@@ -38,3 +38,7 @@ NeoDB
 点击 Tampermonkey 菜单 → **⚙ 评分汇设置**：
 - 设置 TMDB API Key（可选，[申请地址](https://www.themoviedb.org/settings/api)）
 - 开关各评分源
+
+## 反馈
+
+遇到问题或有建议？[提交 Issue](https://github.com/lzblack/userscripts/issues)
