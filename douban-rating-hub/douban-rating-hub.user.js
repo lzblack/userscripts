@@ -232,20 +232,20 @@
   // Cache — 按 channel 缓存评分结果
   // ============================================================
 
-  var CACHE_TTL_SUCCESS = 7 * 24 * 60 * 60 * 1000;    // 7 天
-  var CACHE_TTL_NEGATIVE = 24 * 60 * 60 * 1000;        // 1 天
-  var CACHE_TTL_RATE_LIMITED = 5 * 60 * 1000;           // 5 分钟
+  const CACHE_TTL_SUCCESS = 7 * 24 * 60 * 60 * 1000;    // 7 天
+  const CACHE_TTL_NEGATIVE = 24 * 60 * 60 * 1000;        // 1 天
+  const CACHE_TTL_RATE_LIMITED = 5 * 60 * 1000;           // 5 分钟
 
   function cacheKey(doubanId, channelKey, sourceVersion) {
     return 'rh:' + doubanId + ':' + channelKey + ':' + sourceVersion;
   }
 
   function getCache(doubanId, channelKey, sourceVersion) {
-    var key = cacheKey(doubanId, channelKey, sourceVersion);
-    var entry = deps.storage.get(key);
+    const key = cacheKey(doubanId, channelKey, sourceVersion);
+    const entry = deps.storage.get(key);
     if (!entry) return null;
 
-    var ttl = entry.ttl || 0;
+    const ttl = entry.ttl || 0;
     if (Date.now() > entry.fetchedAt + ttl) {
       deps.storage.remove(key);
       return null;
@@ -254,11 +254,11 @@
   }
 
   function setCache(doubanId, channelKey, sourceVersion, channelResult) {
-    var status = channelResult && channelResult.status;
+    const status = channelResult && channelResult.status;
     // エラー系・スキップ系はキャッシュしない
     if (!status || status === 'error' || status === 'disabled' || status === 'coexist_skip') return;
 
-    var ttl;
+    let ttl;
     if (status === 'rate_limited') {
       ttl = CACHE_TTL_RATE_LIMITED;
     } else if (status === 'no_match' || status === 'no_rating') {
@@ -268,20 +268,20 @@
       ttl = CACHE_TTL_SUCCESS;
     }
 
-    var key = cacheKey(doubanId, channelKey, sourceVersion);
+    const key = cacheKey(doubanId, channelKey, sourceVersion);
     deps.storage.set(key, { fetchedAt: Date.now(), ttl: ttl, result: channelResult });
   }
 
   function evictStale() {
-    var keys = deps.storage.listKeys();
-    var removed = 0;
-    var now = Date.now();
+    const keys = deps.storage.listKeys();
+    let removed = 0;
+    const now = Date.now();
     keys.forEach(function (key) {
       if (!key.startsWith('rh:')) return;
       // 設定キーとクールダウンキーはスキップ
       if (key === 'rh:config' || key.startsWith('rh:cooldown:')) return;
 
-      var entry = deps.storage.get(key);
+      const entry = deps.storage.get(key);
       if (entry && typeof entry.fetchedAt === 'number' && typeof entry.ttl === 'number') {
         if (now > entry.fetchedAt + entry.ttl) {
           deps.storage.remove(key);
@@ -296,13 +296,13 @@
   // Config — 用户设置面板与持久化
   // ============================================================
 
-  var DEFAULT_CONFIG = {
+  const DEFAULT_CONFIG = {
     tmdbApiKey: '',
     enabledSources: {},
   };
 
   function readConfig() {
-    var stored = deps.storage.get('rh:config', {});
+    const stored = deps.storage.get('rh:config', {});
     return Object.assign({}, DEFAULT_CONFIG, stored, {
       enabledSources: Object.assign({}, DEFAULT_CONFIG.enabledSources, stored.enabledSources || {}),
     });
@@ -314,16 +314,16 @@
 
   function openConfigPanel(sources) {
     // 面板已存在则关闭（Toggle 行为）
-    var existing = document.getElementById('rh-config-overlay');
+    const existing = document.getElementById('rh-config-overlay');
     if (existing) {
       existing.remove();
       return;
     }
 
-    var config = readConfig();
+    const config = readConfig();
 
     // 遮罩层
-    var overlay = document.createElement('div');
+    const overlay = document.createElement('div');
     overlay.id = 'rh-config-overlay';
     overlay.style.cssText = [
       'position:fixed', 'inset:0', 'background:rgba(0,0,0,.45)',
@@ -331,7 +331,7 @@
     ].join(';');
 
     // 面板
-    var panel = document.createElement('div');
+    const panel = document.createElement('div');
     panel.style.cssText = [
       'background:#fff', 'border-radius:8px', 'padding:24px 28px',
       'min-width:320px', 'max-width:460px', 'width:90vw',
@@ -340,16 +340,16 @@
     ].join(';');
 
     // 标题
-    var heading = document.createElement('h3');
+    const heading = document.createElement('h3');
     heading.textContent = '评分汇 设置';
     heading.style.cssText = 'margin:0 0 16px;font-size:16px;font-weight:600;';
     panel.appendChild(heading);
 
     // TMDB API Key 输入框
-    var tmdbLabel = document.createElement('label');
+    const tmdbLabel = document.createElement('label');
     tmdbLabel.style.cssText = 'display:block;margin-bottom:4px;font-weight:500;';
     tmdbLabel.textContent = 'TMDB API Key';
-    var tmdbInput = document.createElement('input');
+    const tmdbInput = document.createElement('input');
     tmdbInput.type = 'text';
     tmdbInput.value = config.tmdbApiKey || '';
     tmdbInput.placeholder = '留空则跳过 TMDB 来源';
@@ -363,23 +363,23 @@
 
     // 数据来源启用/禁用
     if (sources && sources.length > 0) {
-      var sourcesLabel = document.createElement('p');
+      const sourcesLabel = document.createElement('p');
       sourcesLabel.style.cssText = 'margin:0 0 8px;font-weight:500;';
       sourcesLabel.textContent = '启用的评分来源';
       panel.appendChild(sourcesLabel);
 
-      var checkboxes = {};
+      const checkboxes = {};
       sources.forEach(function (src) {
-        var row = document.createElement('label');
+        const row = document.createElement('label');
         row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;';
 
-        var cb = document.createElement('input');
+        const cb = document.createElement('input');
         cb.type = 'checkbox';
         // 默认启用（enabledSources 中未设置 false 时视为已启用）
         cb.checked = config.enabledSources[src.key] !== false;
         checkboxes[src.key] = cb;
 
-        var cbLabel = document.createElement('span');
+        const cbLabel = document.createElement('span');
         cbLabel.textContent = src.label || src.key;
 
         row.appendChild(cb);
@@ -392,22 +392,22 @@
     }
 
     // 按钮行
-    var btnRow = document.createElement('div');
+    const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:20px;';
 
-    var cancelBtn = document.createElement('button');
+    const cancelBtn = document.createElement('button');
     cancelBtn.textContent = '取消';
     cancelBtn.style.cssText = 'padding:6px 18px;border:1px solid #ccc;border-radius:4px;cursor:pointer;background:#f5f5f5;';
     cancelBtn.addEventListener('click', function () { overlay.remove(); });
 
-    var saveBtn = document.createElement('button');
+    const saveBtn = document.createElement('button');
     saveBtn.textContent = '保存';
     saveBtn.style.cssText = [
       'padding:6px 18px', 'border:none', 'border-radius:4px',
       'cursor:pointer', 'background:#e9722e', 'color:#fff', 'font-weight:600',
     ].join(';');
     saveBtn.addEventListener('click', function () {
-      var newConfig = readConfig();
+      const newConfig = readConfig();
       newConfig.tmdbApiKey = tmdbInput.value.trim();
       if (panel._checkboxes) {
         Object.keys(panel._checkboxes).forEach(function (k) {
@@ -442,7 +442,7 @@
 
   function ensureStyles() {
     if (document.getElementById('rating-hub-style')) return;
-    var style = document.createElement('style');
+    const style = document.createElement('style');
     style.id = 'rating-hub-style';
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
@@ -462,22 +462,22 @@
   }
 
   function createSlots(channels) {
-    var anchor = document.querySelector('#interest_sectl') || document.querySelector('#wrapper');
+    const anchor = document.querySelector('#interest_sectl') || document.querySelector('#wrapper');
     if (!anchor) return null;
 
-    var container = document.createElement('div');
+    const container = document.createElement('div');
     container.className = 'rating-hub-container';
     container.setAttribute('data-rating-hub', '1');
 
     channels.forEach(function (ch) {
-      var row = document.createElement('div');
+      const row = document.createElement('div');
       row.className = 'rating-hub-row';
       row.setAttribute('data-channel', ch.channelKey);
 
-      var label = document.createElement('span');
+      const label = document.createElement('span');
       label.className = 'rating-hub-label no-link';
       if (ch.icon) {
-        var iconImg = document.createElement('img');
+        const iconImg = document.createElement('img');
         iconImg.className = 'rating-hub-icon';
         iconImg.src = ch.icon;
         iconImg.alt = '';
@@ -486,7 +486,7 @@
       }
       label.appendChild(document.createTextNode(ch.label));
 
-      var status = document.createElement('span');
+      const status = document.createElement('span');
       status.className = 'rating-hub-status';
       status.textContent = '加载中...';
 
@@ -500,22 +500,22 @@
   }
 
   function fillSlot(channelKey, result) {
-    var row = document.querySelector('.rating-hub-row[data-channel="' + channelKey + '"]');
+    const row = document.querySelector('.rating-hub-row[data-channel="' + channelKey + '"]');
     if (!row) return;
 
     // 重建行内容：label + 状态区
-    var label = row.querySelector('.rating-hub-label');
+    const label = row.querySelector('.rating-hub-label');
 
     // 先清空旧状态区（label 保留）
     while (row.lastChild !== label) {
       row.removeChild(row.lastChild);
     }
 
-    var status = result.status;
+    const status = result.status;
 
     if (status === 'success') {
       // Label → 可点击链接
-      var a = document.createElement('a');
+      const a = document.createElement('a');
       a.className = 'rating-hub-label';
       a.href = result.url;
       a.target = '_blank';
@@ -523,13 +523,13 @@
       a.innerHTML = label.innerHTML; // preserves icon img + text
       row.replaceChild(a, label);
 
-      var scoreEl = document.createElement('span');
+      const scoreEl = document.createElement('span');
       scoreEl.className = 'rating-hub-score';
       scoreEl.textContent = result.displayValue || result.score;
       row.appendChild(scoreEl);
 
       if (result.count) {
-        var countEl = document.createElement('span');
+        const countEl = document.createElement('span');
         countEl.className = 'rating-hub-count';
         countEl.textContent = '(' + (result.countText || result.count.toLocaleString()) + ')';
         row.appendChild(countEl);
@@ -537,7 +537,7 @@
 
     } else if (status === 'no_match' || status === 'no_rating') {
       if (result.url) {
-        var a = document.createElement('a');
+        const a = document.createElement('a');
         a.className = 'rating-hub-label';
         a.href = result.url;
         a.target = '_blank';
@@ -546,21 +546,21 @@
         row.replaceChild(a, label);
       }
 
-      var statusEl = document.createElement('span');
+      const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
       statusEl.textContent = status === 'no_match' ? '未收录' : '暂无评分';
       row.appendChild(statusEl);
 
     } else if (status === 'rate_limited') {
-      var statusEl = document.createElement('span');
+      const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
       statusEl.textContent = '请求频繁，稍后重试';
       row.appendChild(statusEl);
 
     } else if (status === 'disabled') {
-      var statusEl = document.createElement('span');
+      const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
-      var configLink = document.createElement('a');
+      const configLink = document.createElement('a');
       configLink.href = '#';
       configLink.textContent = '未配置 API Key';
       configLink.addEventListener('click', function (e) {
@@ -571,14 +571,14 @@
       row.appendChild(statusEl);
 
     } else if (status === 'coexist_skip') {
-      var statusEl = document.createElement('span');
+      const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
       statusEl.textContent = '已由其他脚本提供';
       row.appendChild(statusEl);
 
     } else {
       // error (and any unknown status)
-      var statusEl = document.createElement('span');
+      const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
       statusEl.textContent = '加载失败';
       row.appendChild(statusEl);
@@ -589,7 +589,7 @@
   // Registry — 评分来源注册表
   // ============================================================
 
-  var sources = [];
+  const sources = [];
 
   function getApplicableSources(type, config, meta) {
     return sources.filter(function (source) {
@@ -614,12 +614,12 @@
     channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var searchUrl = 'https://www.imdb.com/search/title/?title=' + encodeURIComponent(meta.title || '');
+        const searchUrl = 'https://www.imdb.com/search/title/?title=' + encodeURIComponent(meta.title || '');
         if (!meta.imdbId) {
           resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: searchUrl } });
           return;
         }
-        var itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
+        const itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
         deps.request(itemUrl).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) {
             resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
@@ -631,16 +631,16 @@
             resolve({ imdb: { channelKey: 'imdb', status: 'error', error: 'WAF challenge', url: itemUrl } });
             return;
           }
-          var doc = deps.parseHTML(resp.responseText);
+          const doc = deps.parseHTML(resp.responseText);
           // Parse LD+JSON for aggregateRating
-          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (var i = 0; i < scripts.length; i++) {
+          const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (let i = 0; i < scripts.length; i++) {
             try {
-              var data = JSON.parse(scripts[i].textContent);
-              var ar = data.aggregateRating;
+              const data = JSON.parse(scripts[i].textContent);
+              const ar = data.aggregateRating;
               if (ar && ar.ratingValue != null) {
-                var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
+                const score = parseFloat(ar.ratingValue);
+                const count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
                 if (isNaN(score)) continue;
                 if (count === 0) {
                   resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
@@ -684,9 +684,9 @@
     ],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var titleForSearch = meta.originalTitle || meta.title || '';
-        var searchUrl = 'https://www.rottentomatoes.com/search?search=' + encodeURIComponent(titleForSearch);
-        var matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+        const titleForSearch = meta.originalTitle || meta.title || '';
+        const searchUrl = 'https://www.rottentomatoes.com/search?search=' + encodeURIComponent(titleForSearch);
+        const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
 
         function noMatchBoth() {
           resolve({
@@ -696,7 +696,7 @@
         }
 
         function buildResults(criticsScore, audienceScore, movieUrl) {
-          var results = {};
+          const results = {};
           if (criticsScore != null && !isNaN(criticsScore)) {
             results.rt_critics = {
               channelKey: 'rt_critics',
@@ -745,18 +745,18 @@
             noMatchBoth();
             return;
           }
-          var searchDoc = deps.parseHTML(searchResp.responseText);
-          var linkEl = searchDoc.querySelector('search-page-media-row a[data-qa="info-name"]');
+          const searchDoc = deps.parseHTML(searchResp.responseText);
+          const linkEl = searchDoc.querySelector('search-page-media-row a[data-qa="info-name"]');
           if (!linkEl) {
             noMatchBoth();
             return;
           }
-          var moviePath = linkEl.getAttribute('href') || '';
+          const moviePath = linkEl.getAttribute('href') || '';
           if (!moviePath) {
             noMatchBoth();
             return;
           }
-          var movieUrl = moviePath.startsWith('http') ? moviePath : 'https://www.rottentomatoes.com' + moviePath;
+          const movieUrl = moviePath.startsWith('http') ? moviePath : 'https://www.rottentomatoes.com' + moviePath;
 
           // Step 2: Fetch movie detail page and extract scores
           deps.request(movieUrl).then(function (movieResp) {
@@ -764,30 +764,30 @@
               noMatchBoth();
               return;
             }
-            var html = movieResp.responseText;
-            var criticsScore = null;
-            var audienceScore = null;
+            const html = movieResp.responseText;
+            let criticsScore = null;
+            let audienceScore = null;
 
             // Method A: JSON in <script type="application/json"> tags
-            var criticsMatch = html.match(/"criticsScore"\s*:\s*(\d+)/);
-            var audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
+            const criticsMatch = html.match(/"criticsScore"\s*:\s*(\d+)/);
+            const audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
             if (criticsMatch) criticsScore = parseInt(criticsMatch[1], 10);
             if (audienceMatch) audienceScore = parseInt(audienceMatch[1], 10);
 
             // Method B: DOM selectors fallback
             if (criticsScore == null || audienceScore == null) {
-              var movieDoc = deps.parseHTML(html);
+              const movieDoc = deps.parseHTML(html);
               if (criticsScore == null) {
-                var csEl = movieDoc.querySelector('rt-text[slot="critics-score"]');
+                const csEl = movieDoc.querySelector('rt-text[slot="critics-score"]');
                 if (csEl) {
-                  var parsed = parseInt(csEl.textContent, 10);
+                  const parsed = parseInt(csEl.textContent, 10);
                   if (!isNaN(parsed)) criticsScore = parsed;
                 }
               }
               if (audienceScore == null) {
-                var asEl = movieDoc.querySelector('rt-text[slot="audience-score"]');
+                const asEl = movieDoc.querySelector('rt-text[slot="audience-score"]');
                 if (asEl) {
-                  var parsedA = parseInt(asEl.textContent, 10);
+                  const parsedA = parseInt(asEl.textContent, 10);
                   if (!isNaN(parsedA)) audienceScore = parsedA;
                 }
               }
@@ -811,23 +811,23 @@
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var titleForSlug = meta.originalTitle || meta.title || '';
+        const titleForSlug = meta.originalTitle || meta.title || '';
         // Build slug: lowercase, remove non-alphanumeric except spaces, replace spaces with hyphens
-        var slug = titleForSlug
+        const slug = titleForSlug
           .toLowerCase()
           .replace(/[^a-z0-9 ]/g, '')
           .trim()
           .replace(/\s+/g, '-');
 
-        var searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
-        var matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+        const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
+        const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
 
         if (!slug) {
           resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
           return;
         }
 
-        var apiUrl = 'https://backend.metacritic.com/movies/metacritic/' + slug + '/web';
+        const apiUrl = 'https://backend.metacritic.com/movies/metacritic/' + slug + '/web';
         deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
           if (resp.status === 404) {
             resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
@@ -838,9 +838,9 @@
             return;
           }
           try {
-            var data = JSON.parse(resp.responseText);
-            var item = data && data.data && data.data.item;
-            var score = item && item.criticScoreSummary && item.criticScoreSummary.score;
+            const data = JSON.parse(resp.responseText);
+            const item = data && data.data && data.data.item;
+            let score = item && item.criticScoreSummary && item.criticScoreSummary.score;
             if (score == null || isNaN(Number(score))) {
               resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/movie/' + slug + '/' } });
               return;
@@ -878,26 +878,26 @@
     channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
+        const searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(meta.title || '') + '/';
         if (!meta.imdbId) {
           resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
           return;
         }
 
-        var csiUrl = 'https://letterboxd.com/csi/film/imdb/' + meta.imdbId + '/ratings-summary/';
-        var fallbackUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
+        const csiUrl = 'https://letterboxd.com/csi/film/imdb/' + meta.imdbId + '/ratings-summary/';
+        const fallbackUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
 
         function parseFromPage(html, pageUrl) {
-          var doc = deps.parseHTML(html);
+          const doc = deps.parseHTML(html);
           // Try LD+JSON first
-          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (var i = 0; i < scripts.length; i++) {
+          const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (let i = 0; i < scripts.length; i++) {
             try {
-              var data = JSON.parse(scripts[i].textContent);
-              var ar = data.aggregateRating;
+              const data = JSON.parse(scripts[i].textContent);
+              const ar = data.aggregateRating;
               if (ar && ar.ratingValue != null) {
-                var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
+                const score = parseFloat(ar.ratingValue);
+                const count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
                 if (!isNaN(score)) {
                   return { score: score, count: count, url: pageUrl };
                 }
@@ -905,8 +905,8 @@
             } catch (e) { /* skip */ }
           }
           // Regex fallback
-          var rvMatch = html.match(/"ratingValue"\s*:\s*([\d.]+)/);
-          var rcMatch = html.match(/"ratingCount"\s*:\s*([\d]+)/);
+          const rvMatch = html.match(/"ratingValue"\s*:\s*([\d.]+)/);
+          const rcMatch = html.match(/"ratingCount"\s*:\s*([\d]+)/);
           if (rvMatch) {
             return {
               score: parseFloat(rvMatch[1]),
@@ -938,15 +938,15 @@
         // PRIMARY: CSI ratings-summary endpoint
         deps.request(csiUrl).then(function (resp) {
           if (resp.status >= 200 && resp.status < 300) {
-            var html = resp.responseText;
+            const html = resp.responseText;
             // Extract weighted average and count
-            var ratingMatch = html.match(/Weighted average of ([\d.]+) based on ([\d,]+)/);
+            const ratingMatch = html.match(/Weighted average of ([\d.]+) based on ([\d,]+)/);
             if (ratingMatch) {
-              var score = parseFloat(ratingMatch[1]);
-              var count = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
+              const score = parseFloat(ratingMatch[1]);
+              const count = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
               // Try to extract film URL from CSI response
-              var filmUrlMatch = html.match(/href="(\/film\/[^"]+)"/);
-              var filmUrl = filmUrlMatch
+              const filmUrlMatch = html.match(/href="(\/film\/[^"]+)"/);
+              const filmUrl = filmUrlMatch
                 ? 'https://letterboxd.com' + filmUrlMatch[1]
                 : fallbackUrl;
               resolve(buildSuccess(score, count, filmUrl));
@@ -955,8 +955,8 @@
           }
           // FALLBACK: full page fetch
           deps.request(fallbackUrl).then(function (pageResp) {
-            var finalUrl = pageResp.finalUrl || fallbackUrl;
-            var parsed = parseFromPage(pageResp.responseText, finalUrl);
+            const finalUrl = pageResp.finalUrl || fallbackUrl;
+            const parsed = parseFromPage(pageResp.responseText, finalUrl);
             if (parsed && !isNaN(parsed.score)) {
               resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
             } else {
@@ -968,8 +968,8 @@
         }).catch(function () {
           // CSI request failed entirely, try fallback
           deps.request(fallbackUrl).then(function (pageResp) {
-            var finalUrl = pageResp.finalUrl || fallbackUrl;
-            var parsed = parseFromPage(pageResp.responseText, finalUrl);
+            const finalUrl = pageResp.finalUrl || fallbackUrl;
+            const parsed = parseFromPage(pageResp.responseText, finalUrl);
             if (parsed && !isNaN(parsed.score)) {
               resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
             } else {
@@ -991,19 +991,19 @@
     channels: [{ channelKey: 'tmdb', label: 'TMDB', icon: 'https://www.themoviedb.org/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var config = readConfig();
-        var apiKey = config.tmdbApiKey;
-        var searchUrl = 'https://www.themoviedb.org/search?query=' + encodeURIComponent(meta.title || '');
+        const config = readConfig();
+        const apiKey = config.tmdbApiKey;
+        const searchUrl = 'https://www.themoviedb.org/search?query=' + encodeURIComponent(meta.title || '');
 
         function noMatch() {
           resolve({ tmdb: { channelKey: 'tmdb', status: 'no_match', url: searchUrl } });
         }
 
         function buildSuccess(movie, matchedBy, matchConfidence) {
-          var score = parseFloat(movie.vote_average);
-          var count = parseInt(movie.vote_count, 10) || 0;
-          var mediaType = movie.media_type === 'tv' || movie.first_air_date ? 'tv' : 'movie';
-          var movieUrl = 'https://www.themoviedb.org/' + mediaType + '/' + movie.id;
+          const score = parseFloat(movie.vote_average);
+          const count = parseInt(movie.vote_count, 10) || 0;
+          const mediaType = movie.media_type === 'tv' || movie.first_air_date ? 'tv' : 'movie';
+          const movieUrl = 'https://www.themoviedb.org/' + mediaType + '/' + movie.id;
           if (isNaN(score) || count === 0) {
             resolve({ tmdb: { channelKey: 'tmdb', status: 'no_rating', url: movieUrl } });
             return;
@@ -1039,8 +1039,8 @@
             return;
           }
           try {
-            var data = JSON.parse(resp.responseText);
-            var movie = extractMovie(data);
+            const data = JSON.parse(resp.responseText);
+            const movie = extractMovie(data);
             if (!movie) { noMatch(); return; }
             buildSuccess(movie, matchedBy, matchConfidence);
           } catch (e) {
@@ -1050,7 +1050,7 @@
 
         if (meta.imdbId) {
           // Prefer IMDB ID lookup via /find
-          var findUrl = 'https://api.themoviedb.org/3/find/' + meta.imdbId +
+          const findUrl = 'https://api.themoviedb.org/3/find/' + meta.imdbId +
             '?api_key=' + encodeURIComponent(apiKey) + '&external_source=imdb_id';
           deps.request(findUrl).then(function (resp) {
             handleResp(resp, function (data) {
@@ -1059,8 +1059,8 @@
           }).catch(function () { noMatch(); });
         } else {
           // Fallback to title search
-          var year = meta.year ? '&year=' + encodeURIComponent(meta.year) : '';
-          var queryUrl = 'https://api.themoviedb.org/3/search/movie?api_key=' +
+          const year = meta.year ? '&year=' + encodeURIComponent(meta.year) : '';
+          const queryUrl = 'https://api.themoviedb.org/3/search/movie?api_key=' +
             encodeURIComponent(apiKey) + '&query=' + encodeURIComponent(meta.title || '') + year;
           deps.request(queryUrl).then(function (resp) {
             handleResp(resp, function (data) {
@@ -1084,8 +1084,8 @@
       return new Promise(function (resolve) {
         // Search: https://api.bgm.tv/search/subject/{keyword}?type=2&responseGroup=small
         // type=2 → anime; MUST send User-Agent header (otherwise 403)
-        var keyword = encodeURIComponent(meta.title || '');
-        var apiUrl = 'https://api.bgm.tv/search/subject/' + keyword + '?type=2&responseGroup=small';
+        const keyword = encodeURIComponent(meta.title || '');
+        const apiUrl = 'https://api.bgm.tv/search/subject/' + keyword + '?type=2&responseGroup=small';
 
         function noMatch() {
           resolve({ bangumi: { channelKey: 'bangumi', status: 'no_match' } });
@@ -1102,17 +1102,17 @@
         }).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) { errResult(); return; }
           try {
-            var data = JSON.parse(resp.responseText);
-            var list = data.list || [];
+            const data = JSON.parse(resp.responseText);
+            const list = data.list || [];
             // find first result with type=2 (anime)
-            var item = null;
-            for (var i = 0; i < list.length; i++) {
+            let item = null;
+            for (let i = 0; i < list.length; i++) {
               if (list[i].type === 2) { item = list[i]; break; }
             }
             if (!item) { noMatch(); return; }
-            var score = item.rating ? parseFloat(item.rating.score) : NaN;
-            var total = item.rating ? item.rating.total : null;
-            var pageUrl = 'https://bgm.tv/subject/' + item.id;
+            const score = item.rating ? parseFloat(item.rating.score) : NaN;
+            const total = item.rating ? item.rating.total : null;
+            const pageUrl = 'https://bgm.tv/subject/' + item.id;
             if (isNaN(score) || score <= 0) {
               resolve({ bangumi: { channelKey: 'bangumi', status: 'no_rating', url: pageUrl } });
               return;
@@ -1149,8 +1149,8 @@
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Search: https://api.jikan.moe/v4/anime?q={title}&limit=3
-        var keyword = encodeURIComponent(meta.originalTitle || meta.title || '');
-        var apiUrl = 'https://api.jikan.moe/v4/anime?q=' + keyword + '&limit=3';
+        const keyword = encodeURIComponent(meta.originalTitle || meta.title || '');
+        const apiUrl = 'https://api.jikan.moe/v4/anime?q=' + keyword + '&limit=3';
 
         function noMatch() {
           resolve({ mal: { channelKey: 'mal', status: 'no_match' } });
@@ -1162,13 +1162,13 @@
         deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) { errResult(); return; }
           try {
-            var data = JSON.parse(resp.responseText);
-            var list = data.data || [];
+            const data = JSON.parse(resp.responseText);
+            const list = data.data || [];
             if (!list.length) { noMatch(); return; }
-            var item = list[0];
-            var score = item.score != null ? parseFloat(item.score) : NaN;
-            var scoredBy = item.scored_by || null;
-            var pageUrl = 'https://myanimelist.net/anime/' + item.mal_id;
+            const item = list[0];
+            const score = item.score != null ? parseFloat(item.score) : NaN;
+            const scoredBy = item.scored_by || null;
+            const pageUrl = 'https://myanimelist.net/anime/' + item.mal_id;
             if (isNaN(score) || score <= 0) {
               resolve({ mal: { channelKey: 'mal', status: 'no_rating', url: pageUrl } });
               return;
@@ -1202,7 +1202,7 @@
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Query cascade: ISBN → originalTitle → title
-        var queries = [];
+        const queries = [];
         if (meta.isbn) queries.push(meta.isbn);
         if (meta.originalTitle && meta.originalTitle !== meta.title) queries.push(meta.originalTitle);
         if (meta.title) queries.push(meta.title);
@@ -1211,22 +1211,22 @@
           return;
         }
 
-        var detailPathRe = /goodreads\.com\/book\/show\//;
+        const detailPathRe = /goodreads\.com\/book\/show\//;
 
         function noMatch() {
-          var url = 'https://www.goodreads.com/search?q=' + encodeURIComponent(queries[0]);
+          const url = 'https://www.goodreads.com/search?q=' + encodeURIComponent(queries[0]);
           resolve({ goodreads: { channelKey: 'goodreads', status: 'no_match', url: url } });
         }
 
         function parseDetail(doc, url) {
-          var ratingEl = doc.querySelector('.RatingStatistics__rating');
-          var score = ratingEl ? parseFloat(ratingEl.textContent.trim()) : NaN;
+          const ratingEl = doc.querySelector('.RatingStatistics__rating');
+          const score = ratingEl ? parseFloat(ratingEl.textContent.trim()) : NaN;
           if (isNaN(score)) return null;
 
-          var countEl = doc.querySelector('[data-testid="ratingsCount"]');
-          var count = 0;
+          const countEl = doc.querySelector('[data-testid="ratingsCount"]');
+          let count = 0;
           if (countEl) {
-            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            const cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
             if (cm) count = parseInt(cm[1], 10);
           }
           return { score: score, count: count, url: url };
@@ -1252,33 +1252,33 @@
 
         function tryQuery(queryIndex) {
           if (queryIndex >= queries.length) { noMatch(); return; }
-          var query = queries[queryIndex];
-          var isIsbn = queryIndex === 0 && !!meta.isbn;
-          var matchedBy = isIsbn ? 'isbn' : 'title';
-          var confidence = isIsbn ? 'exact' : 'fuzzy';
-          var searchUrl = 'https://www.goodreads.com/search?q=' + encodeURIComponent(query);
+          const query = queries[queryIndex];
+          const isIsbn = queryIndex === 0 && !!meta.isbn;
+          const matchedBy = isIsbn ? 'isbn' : 'title';
+          const confidence = isIsbn ? 'exact' : 'fuzzy';
+          const searchUrl = 'https://www.goodreads.com/search?q=' + encodeURIComponent(query);
 
           deps.request(searchUrl).then(function (resp) {
             if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
-            var finalUrl = resp.finalUrl || searchUrl;
+            const finalUrl = resp.finalUrl || searchUrl;
             // If search redirected directly to a book detail page
             if (detailPathRe.test(finalUrl)) {
-              var doc = deps.parseHTML(resp.responseText);
-              var parsed = parseDetail(doc, finalUrl);
+              const doc = deps.parseHTML(resp.responseText);
+              const parsed = parseDetail(doc, finalUrl);
               if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
               else { tryQuery(queryIndex + 1); }
               return;
             }
             // Search results page — find first bookTitle link
-            var doc = deps.parseHTML(resp.responseText);
-            var linkEl = doc.querySelector('a.bookTitle');
+            const doc = deps.parseHTML(resp.responseText);
+            const linkEl = doc.querySelector('a.bookTitle');
             if (!linkEl) { tryQuery(queryIndex + 1); return; }
-            var href = linkEl.getAttribute('href') || '';
-            var detailUrl = href.startsWith('http') ? href : 'https://www.goodreads.com' + href;
+            const href = linkEl.getAttribute('href') || '';
+            const detailUrl = href.startsWith('http') ? href : 'https://www.goodreads.com' + href;
             deps.request(detailUrl).then(function (detailResp) {
               if (detailResp.status < 200 || detailResp.status >= 300) { tryQuery(queryIndex + 1); return; }
-              var detailDoc = deps.parseHTML(detailResp.responseText);
-              var parsed = parseDetail(detailDoc, detailResp.finalUrl || detailUrl);
+              const detailDoc = deps.parseHTML(detailResp.responseText);
+              const parsed = parseDetail(detailDoc, detailResp.finalUrl || detailUrl);
               if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
               else { tryQuery(queryIndex + 1); }
             }).catch(function () { tryQuery(queryIndex + 1); });
@@ -1298,8 +1298,8 @@
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // Query cascade: ISBN → originalTitle+creator → title+creator
-        var creator = meta.creator || '';
-        var queries = [];
+        const creator = meta.creator || '';
+        const queries = [];
         if (meta.isbn) queries.push(meta.isbn);
         if (meta.originalTitle && meta.originalTitle !== meta.title) {
           queries.push(creator ? meta.originalTitle + ' ' + creator : meta.originalTitle);
@@ -1312,19 +1312,19 @@
           return;
         }
 
-        var dpPathRe = /amazon\.com(\/[^/]+)?\/dp\//;
+        const dpPathRe = /amazon\.com(\/[^/]+)?\/dp\//;
 
         function noMatch() {
-          var url = 'https://www.amazon.com/s?k=' + encodeURIComponent(queries[0]);
+          const url = 'https://www.amazon.com/s?k=' + encodeURIComponent(queries[0]);
           resolve({ amazon: { channelKey: 'amazon', status: 'no_match', url: url } });
         }
 
         function parseDetail(doc, url) {
           // Try [data-hook="rating-out-of-text"] first, fall back to .a-icon-alt
-          var ratingEl = doc.querySelector('[data-hook="rating-out-of-text"]');
+          let ratingEl = doc.querySelector('[data-hook="rating-out-of-text"]');
           if (!ratingEl) {
-            var candidates = doc.querySelectorAll('.a-icon-alt');
-            for (var i = 0; i < candidates.length; i++) {
+            const candidates = doc.querySelectorAll('.a-icon-alt');
+            for (let i = 0; i < candidates.length; i++) {
               if (/out of 5 stars/i.test(candidates[i].textContent)) {
                 ratingEl = candidates[i];
                 break;
@@ -1332,16 +1332,16 @@
             }
           }
           if (!ratingEl) return null;
-          var ratingMatch = ratingEl.textContent.match(/([\d.]+)/);
+          const ratingMatch = ratingEl.textContent.match(/([\d.]+)/);
           if (!ratingMatch) return null;
-          var score = parseFloat(ratingMatch[1]);
+          const score = parseFloat(ratingMatch[1]);
           if (isNaN(score)) return null;
 
-          var countEl = doc.querySelector('#acrCustomerReviewText') ||
+          const countEl = doc.querySelector('#acrCustomerReviewText') ||
                         doc.querySelector('[data-hook="total-review-count"]');
-          var count = 0;
+          let count = 0;
           if (countEl) {
-            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            const cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
             if (cm) count = parseInt(cm[1], 10);
           }
           return { score: score, count: count, url: url };
@@ -1369,8 +1369,8 @@
           deps.request(url, { headers: { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } })
             .then(function (resp) {
               if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
-              var doc = deps.parseHTML(resp.responseText);
-              var parsed = parseDetail(doc, resp.finalUrl || url);
+              const doc = deps.parseHTML(resp.responseText);
+              const parsed = parseDetail(doc, resp.finalUrl || url);
               if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
               else { onFail(); }
             }).catch(onFail);
@@ -1378,32 +1378,32 @@
 
         function tryQuery(queryIndex) {
           if (queryIndex >= queries.length) { noMatch(); return; }
-          var query = queries[queryIndex];
-          var isIsbn = queryIndex === 0 && !!meta.isbn;
-          var matchedBy = isIsbn ? 'isbn' : 'title';
-          var confidence = isIsbn ? 'exact' : 'fuzzy';
-          var searchUrl = 'https://www.amazon.com/s?k=' + encodeURIComponent(query);
+          const query = queries[queryIndex];
+          const isIsbn = queryIndex === 0 && !!meta.isbn;
+          const matchedBy = isIsbn ? 'isbn' : 'title';
+          const confidence = isIsbn ? 'exact' : 'fuzzy';
+          const searchUrl = 'https://www.amazon.com/s?k=' + encodeURIComponent(query);
 
           deps.request(searchUrl, { headers: { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } })
             .then(function (resp) {
               if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
-              var finalUrl = resp.finalUrl || searchUrl;
+              const finalUrl = resp.finalUrl || searchUrl;
               // If search landed directly on a product detail page
               if (dpPathRe.test(finalUrl)) {
-                var doc = deps.parseHTML(resp.responseText);
-                var parsed = parseDetail(doc, finalUrl);
+                const doc = deps.parseHTML(resp.responseText);
+                const parsed = parseDetail(doc, finalUrl);
                 if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
                 else { tryQuery(queryIndex + 1); }
                 return;
               }
               // Search results — find first result link
-              var doc = deps.parseHTML(resp.responseText);
-              var resultEl = doc.querySelector('[data-component-type="s-search-result"]');
+              const doc = deps.parseHTML(resp.responseText);
+              const resultEl = doc.querySelector('[data-component-type="s-search-result"]');
               if (!resultEl) { tryQuery(queryIndex + 1); return; }
-              var linkEl = resultEl.querySelector('h2 a') || resultEl.querySelector('a[href*="/dp/"]');
+              const linkEl = resultEl.querySelector('h2 a') || resultEl.querySelector('a[href*="/dp/"]');
               if (!linkEl) { tryQuery(queryIndex + 1); return; }
-              var href = linkEl.getAttribute('href') || '';
-              var detailUrl = href.startsWith('http') ? href : 'https://www.amazon.com' + href;
+              const href = linkEl.getAttribute('href') || '';
+              const detailUrl = href.startsWith('http') ? href : 'https://www.amazon.com' + href;
               fetchDetail(detailUrl, matchedBy, confidence, function () { tryQuery(queryIndex + 1); });
             }).catch(function () { tryQuery(queryIndex + 1); });
         }
@@ -1420,8 +1420,8 @@
     channels: [{ channelKey: 'weread', label: '微信读书', icon: 'https://weread.qq.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var title = meta.title || '';
-        var searchPageUrl = 'https://weread.qq.com/web/search/books?keyword=' + encodeURIComponent(title);
+        const title = meta.title || '';
+        const searchPageUrl = 'https://weread.qq.com/web/search/books?keyword=' + encodeURIComponent(title);
 
         function noMatch() {
           resolve({ weread: { channelKey: 'weread', status: 'no_match', url: searchPageUrl } });
@@ -1434,30 +1434,30 @@
           return t.toLowerCase().replace(/[^\w\u4e00-\u9fff\u3040-\u30ff]/g, '');
         }
 
-        var normalizedQuery = normalizeTitle(title);
-        var apiUrl = 'https://weread.qq.com/web/search/global?keyword=' + encodeURIComponent(title);
+        const normalizedQuery = normalizeTitle(title);
+        const apiUrl = 'https://weread.qq.com/web/search/global?keyword=' + encodeURIComponent(title);
 
         deps.request(apiUrl, {
           headers: { 'Referer': 'https://weread.qq.com/', 'Accept': 'application/json' },
         }).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) { noMatch(); return; }
-          var data;
+          let data;
           try { data = JSON.parse(resp.responseText); } catch (e) { noMatch(); return; }
 
-          var books = (data && data.books) ? data.books : [];
+          const books = (data && data.books) ? data.books : [];
           if (!books.length) { noMatch(); return; }
 
           // Match: exact → partial → first result
-          var matched = null;
-          for (var i = 0; i < books.length; i++) {
-            var bookInfo = books[i].bookInfo || books[i];
-            var bookTitle = normalizeTitle(bookInfo.title || '');
+          let matched = null;
+          for (let i = 0; i < books.length; i++) {
+            const bookInfo = books[i].bookInfo || books[i];
+            const bookTitle = normalizeTitle(bookInfo.title || '');
             if (bookTitle === normalizedQuery) { matched = bookInfo; break; }
           }
           if (!matched) {
-            for (var j = 0; j < books.length; j++) {
-              var bi = books[j].bookInfo || books[j];
-              var bt = normalizeTitle(bi.title || '');
+            for (let j = 0; j < books.length; j++) {
+              const bi = books[j].bookInfo || books[j];
+              const bt = normalizeTitle(bi.title || '');
               if (bt.indexOf(normalizedQuery) !== -1 || normalizedQuery.indexOf(bt) !== -1) {
                 matched = bi;
                 break;
@@ -1468,15 +1468,15 @@
             matched = books[0].bookInfo || books[0];
           }
 
-          var rawRating = matched.newRating;
+          const rawRating = matched.newRating;
           if (rawRating == null || rawRating === 0) {
             resolve({ weread: { channelKey: 'weread', status: 'no_rating', url: searchPageUrl } });
             return;
           }
 
           // newRating is on a 0–1000 scale → percentage display
-          var percentage = rawRating / 10;
-          var count = matched.newRatingCount || 0;
+          const percentage = rawRating / 10;
+          const count = matched.newRatingCount || 0;
 
           resolve({
             weread: {
@@ -1507,9 +1507,9 @@
     requiredConfig: null,
     channels: [{ channelKey: 'discogs', label: 'Discogs', icon: 'https://www.discogs.com/favicon.ico' }],
     fetch: function (meta, deps) {
-      var query = meta.originalTitle || meta.title;
+      let query = meta.originalTitle || meta.title;
       if (meta.creator) query += ' ' + meta.creator;
-      var searchUrl = 'https://api.discogs.com/database/search?q=' + encodeURIComponent(query) + '&type=master&per_page=3';
+      const searchUrl = 'https://api.discogs.com/database/search?q=' + encodeURIComponent(query) + '&type=master&per_page=3';
 
       function noMatch() {
         return { discogs: { channelKey: 'discogs', status: 'no_match', url: 'https://www.discogs.com/search?q=' + encodeURIComponent(meta.title) + '&type=master' } };
@@ -1522,25 +1522,25 @@
         headers: { 'User-Agent': 'DoubanRatingHub/0.1' },
       }).then(function (resp) {
         if (resp.status !== 200) return noMatch();
-        var data = JSON.parse(resp.responseText);
+        const data = JSON.parse(resp.responseText);
         if (!data.results || data.results.length === 0) return noMatch();
 
-        var master = data.results[0];
-        var masterId = master.id;
-        var masterUrl = 'https://www.discogs.com/master/' + masterId;
+        const master = data.results[0];
+        const masterId = master.id;
+        const masterUrl = 'https://www.discogs.com/master/' + masterId;
 
         return deps.request('https://api.discogs.com/masters/' + masterId, {
           headers: { 'User-Agent': 'DoubanRatingHub/0.1' },
         }).then(function (masterResp) {
-          var masterData = JSON.parse(masterResp.responseText);
-          var mainReleaseId = masterData.main_release;
+          const masterData = JSON.parse(masterResp.responseText);
+          const mainReleaseId = masterData.main_release;
           if (!mainReleaseId) return noRating(masterUrl);
 
           return deps.request('https://api.discogs.com/releases/' + mainReleaseId, {
             headers: { 'User-Agent': 'DoubanRatingHub/0.1' },
           }).then(function (releaseResp) {
-            var releaseData = JSON.parse(releaseResp.responseText);
-            var rating = releaseData.community && releaseData.community.rating;
+            const releaseData = JSON.parse(releaseResp.responseText);
+            const rating = releaseData.community && releaseData.community.rating;
             if (!rating || !rating.average || rating.count === 0) return noRating(masterUrl);
 
             return {
@@ -1573,7 +1573,7 @@
     requiredConfig: null,
     channels: [{ channelKey: 'apple_podcasts', label: 'Apple Podcasts', icon: 'https://podcasts.apple.com/favicon.ico' }],
     fetch: function (meta, deps) {
-      var searchUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(meta.title) + '&media=podcast&country=us&limit=5';
+      const searchUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(meta.title) + '&media=podcast&country=us&limit=5';
 
       function noMatch() {
         return { apple_podcasts: { channelKey: 'apple_podcasts', status: 'no_match', url: 'https://podcasts.apple.com/us/search?term=' + encodeURIComponent(meta.title) } };
@@ -1582,34 +1582,34 @@
       return deps.request(searchUrl, {
         headers: { 'Accept': 'application/json' },
       }).then(function (resp) {
-        var data = JSON.parse(resp.responseText);
+        const data = JSON.parse(resp.responseText);
         if (!data.results || data.results.length === 0) return noMatch();
 
         // 按标题匹配最佳结果
-        var normalizedTitle = meta.title.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
-        var best = data.results[0];
-        for (var i = 0; i < data.results.length; i++) {
-          var nt = data.results[i].trackName.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
+        const normalizedTitle = meta.title.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
+        let best = data.results[0];
+        for (let i = 0; i < data.results.length; i++) {
+          const nt = data.results[i].trackName.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
           if (nt === normalizedTitle || nt.indexOf(normalizedTitle) !== -1 || normalizedTitle.indexOf(nt) !== -1) {
             best = data.results[i];
             break;
           }
         }
 
-        var trackId = best.trackId;
-        var podcastUrl = 'https://podcasts.apple.com/us/podcast/id' + trackId;
+        const trackId = best.trackId;
+        const podcastUrl = 'https://podcasts.apple.com/us/podcast/id' + trackId;
 
         return deps.request(podcastUrl).then(function (pageResp) {
-          var doc = deps.parseHTML(pageResp.responseText);
+          const doc = deps.parseHTML(pageResp.responseText);
 
           // 优先尝试 JSON-LD aggregateRating
-          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (var j = 0; j < scripts.length; j++) {
+          const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (let j = 0; j < scripts.length; j++) {
             try {
-              var ld = JSON.parse(scripts[j].textContent);
+              const ld = JSON.parse(scripts[j].textContent);
               if (ld.aggregateRating) {
-                var score = parseFloat(ld.aggregateRating.ratingValue);
-                var count = parseInt(ld.aggregateRating.reviewCount || ld.aggregateRating.ratingCount, 10) || 0;
+                const score = parseFloat(ld.aggregateRating.ratingValue);
+                const count = parseInt(ld.aggregateRating.reviewCount || ld.aggregateRating.ratingCount, 10) || 0;
                 if (score > 0) {
                   return {
                     apple_podcasts: {
@@ -1632,13 +1632,13 @@
           }
 
           // 回退：aria-label 评分元素
-          var ratingEl = doc.querySelector('[data-testid="show-hero__rating"]');
+          const ratingEl = doc.querySelector('[data-testid="show-hero__rating"]');
           if (ratingEl) {
-            var ariaMatch = (ratingEl.getAttribute('aria-label') || '').match(/([\d.]+)\s*out of\s*5/);
-            var countMatch = (ratingEl.getAttribute('aria-label') || '').match(/([\d,]+)\s*ratings/);
+            const ariaMatch = (ratingEl.getAttribute('aria-label') || '').match(/([\d.]+)\s*out of\s*5/);
+            const countMatch = (ratingEl.getAttribute('aria-label') || '').match(/([\d,]+)\s*ratings/);
             if (ariaMatch) {
-              var s = parseFloat(ariaMatch[1]);
-              var c = countMatch ? parseInt(countMatch[1].replace(/,/g, ''), 10) : 0;
+              const s = parseFloat(ariaMatch[1]);
+              const c = countMatch ? parseInt(countMatch[1].replace(/,/g, ''), 10) : 0;
               return {
                 apple_podcasts: {
                   channelKey: 'apple_podcasts',
@@ -1674,12 +1674,12 @@
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // 分类映射：music → album
-        var categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game', drama: 'performance', podcast: 'podcast' };
-        var category = categoryMap[meta.type] || 'all';
+        const categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game', drama: 'performance', podcast: 'podcast' };
+        const category = categoryMap[meta.type] || 'all';
 
         // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
-        var doubanUrl = location.href.split('?')[0].split('#')[0];
-        var queries = [doubanUrl];
+        const doubanUrl = location.href.split('?')[0].split('#')[0];
+        const queries = [doubanUrl];
         if (meta.originalTitle && meta.originalTitle !== meta.title) {
           queries.push(meta.originalTitle);
         }
@@ -1688,34 +1688,34 @@
         }
 
         // 匹配 NeoDB 条目详情页路径
-        var detailPathRe = /neodb\.social\/(book|movie|album|music|game|tv\/season|tv|podcast|performance)\//;
+        const detailPathRe = /neodb\.social\/(book|movie|album|music|game|tv\/season|tv|podcast|performance)\//;
 
         function parseDetail(doc, url) {
           // 优先用 JSON-LD aggregateRating
-          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-          for (var i = 0; i < scripts.length; i++) {
+          const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (let i = 0; i < scripts.length; i++) {
             try {
-              var data = JSON.parse(scripts[i].textContent);
-              var ar = data.aggregateRating;
+              const data = JSON.parse(scripts[i].textContent);
+              const ar = data.aggregateRating;
               if (ar && ar.ratingValue != null) {
-                var score = parseFloat(ar.ratingValue);
-                var count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
+                const score = parseFloat(ar.ratingValue);
+                const count = parseInt(ar.ratingCount || ar.reviewCount, 10) || 0;
                 if (isNaN(score)) continue;
                 return { found: true, hasRating: score > 0, score: score, count: count, url: url };
               }
             } catch (e) { /* skip */ }
           }
           // 回退：DOM 结构解析
-          var displayBlock =
+          const displayBlock =
             doc.querySelector('#item-rating .display') ||
             doc.querySelector('.rating .display') ||
             doc.querySelector('.display');
-          var undisplayEl = doc.querySelector('.undisplay');
+          const undisplayEl = doc.querySelector('.undisplay');
           if (undisplayEl && !displayBlock) {
             return { found: true, hasRating: false, url: url };
           }
           // 尝试找评分数字
-          var ratingEl =
+          let ratingEl =
             doc.querySelector('.rating-num') ||
             doc.querySelector('[itemprop="ratingValue"]');
           if (!ratingEl && displayBlock) {
@@ -1727,11 +1727,11 @@
             });
           }
           if (!ratingEl) return { found: true, hasRating: false, url: url };
-          var ratingMatch = ratingEl.textContent.match(/[\d.]+/);
+          const ratingMatch = ratingEl.textContent.match(/[\d.]+/);
           if (!ratingMatch) return { found: true, hasRating: false, url: url };
-          var score = parseFloat(ratingMatch[0]);
+          const score = parseFloat(ratingMatch[0]);
           // 评分人数
-          var countEl =
+          let countEl =
             doc.querySelector('.rating-people') ||
             doc.querySelector('[itemprop="ratingCount"]');
           if (!countEl && displayBlock) {
@@ -1739,16 +1739,16 @@
               return /\d+\s*(个评分|人评分|ratings?)/i.test(el.textContent);
             });
           }
-          var count = 0;
+          let count = 0;
           if (countEl) {
-            var cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
+            const cm = countEl.textContent.replace(/,/g, '').match(/(\d+)/);
             if (cm) count = parseInt(cm[1], 10);
           }
           return { found: true, hasRating: score > 0, score: score, count: count, url: url };
         }
 
         function buildResult(parsed, matchedBy, confidence) {
-          var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+          const searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
           if (!parsed || !parsed.found) {
             return { neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } };
           }
@@ -1775,34 +1775,34 @@
         function fetchDetail(url, matchedBy, confidence, onSuccess, onFail) {
           deps.request(url).then(function (resp) {
             if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
-            var doc = deps.parseHTML(resp.responseText);
-            var parsed = parseDetail(doc, resp.finalUrl || url);
+            const doc = deps.parseHTML(resp.responseText);
+            const parsed = parseDetail(doc, resp.finalUrl || url);
             onSuccess(parsed, matchedBy, confidence);
           }).catch(onFail);
         }
 
         function tryQuery(queryIndex) {
           if (queryIndex >= queries.length) {
-            var searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
+            const searchUrl = 'https://neodb.social/search?q=' + encodeURIComponent(queries[0]) + '&category=' + category;
             resolve({ neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } });
             return;
           }
-          var query = queries[queryIndex];
-          var isUrlQuery = /^https?:\/\//.test(query);
-          var matchedBy = isUrlQuery ? 'douban_url' : 'title';
-          var confidence = isUrlQuery ? 'exact' : 'fuzzy';
-          var searchUrl = 'https://neodb.social/search?' + new URLSearchParams({ q: query, category: category }).toString();
+          const query = queries[queryIndex];
+          const isUrlQuery = /^https?:\/\//.test(query);
+          const matchedBy = isUrlQuery ? 'douban_url' : 'title';
+          const confidence = isUrlQuery ? 'exact' : 'fuzzy';
+          const searchUrl = 'https://neodb.social/search?' + new URLSearchParams({ q: query, category: category }).toString();
 
           deps.request(searchUrl).then(function (resp) {
             if (resp.status < 200 || resp.status >= 300) {
               tryQuery(queryIndex + 1);
               return;
             }
-            var finalUrl = resp.finalUrl || searchUrl;
+            const finalUrl = resp.finalUrl || searchUrl;
             // 情况一：搜索直接重定向到详情页
             if (detailPathRe.test(finalUrl)) {
-              var doc = deps.parseHTML(resp.responseText);
-              var parsed = parseDetail(doc, finalUrl);
+              const doc = deps.parseHTML(resp.responseText);
+              const parsed = parseDetail(doc, finalUrl);
               if (parsed && parsed.found) {
                 resolve(buildResult(parsed, matchedBy, confidence));
               } else {
@@ -1811,13 +1811,13 @@
               return;
             }
             // 情况二：搜索列表页，找第一个结果卡片
-            var doc = deps.parseHTML(resp.responseText);
-            var card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
+            const doc = deps.parseHTML(resp.responseText);
+            const card = doc.querySelector('.entity-card, .catalog-card, .subject-card');
             if (!card) { tryQuery(queryIndex + 1); return; }
-            var linkEl = card.querySelector('.title a') || card.querySelector('a');
+            const linkEl = card.querySelector('.title a') || card.querySelector('a');
             if (!linkEl) { tryQuery(queryIndex + 1); return; }
-            var href = linkEl.getAttribute('href') || '';
-            var detailUrl = href.startsWith('http') ? href : 'https://neodb.social' + href;
+            const href = linkEl.getAttribute('href') || '';
+            const detailUrl = href.startsWith('http') ? href : 'https://neodb.social' + href;
             fetchDetail(
               detailUrl,
               matchedBy,
@@ -1845,13 +1845,13 @@
 
   function checkCoexistence() {
     if (document.getElementById('douban-neodb-rating-style')) return true;
-    var thirdParty = document.querySelector('.douban-thirdparty-rating');
+    const thirdParty = document.querySelector('.douban-thirdparty-rating');
     if (thirdParty && thirdParty.textContent.indexOf('NeoDB') !== -1) return true;
     return false;
   }
 
   function isCooldownActive(sourceKey) {
-    var entry = deps.storage.get('rh:cooldown:' + sourceKey);
+    const entry = deps.storage.get('rh:cooldown:' + sourceKey);
     if (!entry) return false;
     if (Date.now() > entry.until) {
       deps.storage.remove('rh:cooldown:' + sourceKey);
@@ -1866,7 +1866,7 @@
 
   function fetchAll(applicableSources, meta, config, onChannelReady) {
     applicableSources.forEach(function (source) {
-      var channelKeys = source.channels.map(function (ch) { return ch.channelKey; });
+      const channelKeys = source.channels.map(function (ch) { return ch.channelKey; });
 
       function emitAll(result) {
         channelKeys.forEach(function (key) {
@@ -1882,7 +1882,7 @@
 
       // Pre-flight: 必要配置缺失
       if (source.requiredConfig) {
-        var missing = source.requiredConfig.some(function (cfgKey) {
+        const missing = source.requiredConfig.some(function (cfgKey) {
           return !config[cfgKey];
         });
         if (missing) {
@@ -1900,10 +1900,10 @@
       }
 
       // 检查所有 channel 缓存
-      var cached = {};
-      var allCached = true;
+      const cached = {};
+      let allCached = true;
       channelKeys.forEach(function (key) {
-        var hit = getCache(meta.doubanId, key, source.version || '1');
+        const hit = getCache(meta.doubanId, key, source.version || '1');
         if (hit) {
           cached[key] = hit;
         } else {
@@ -1926,7 +1926,7 @@
         // results: { [channelKey]: ChannelResult }
         channelKeys.forEach(function (key) {
           if (cached[key]) return; // 已从缓存渲染，跳过
-          var result = (results && results[key]) || { status: 'error' };
+          const result = (results && results[key]) || { status: 'error' };
           setCache(meta.doubanId, key, source.version || '1', result);
           if (result.status === 'rate_limited') setCooldown(source.key);
           onChannelReady(key, result);
@@ -1945,23 +1945,23 @@
   // ============================================================
 
   function init() {
-    var meta = extractMeta();
+    const meta = extractMeta();
     if (meta.type === 'unknown' || !meta.doubanId) return;
 
     // 排除非条目主页路径
-    var excludedPaths = ['/doulists', '/photos', '/discussion', '/reviews', '/comments', '/collections'];
-    var path = location.pathname;
-    for (var i = 0; i < excludedPaths.length; i++) {
+    const excludedPaths = ['/doulists', '/photos', '/discussion', '/reviews', '/comments', '/collections'];
+    const path = location.pathname;
+    for (let i = 0; i < excludedPaths.length; i++) {
       if (path.indexOf(excludedPaths[i]) !== -1) return;
     }
 
-    var config = readConfig();
-    var applicable = getApplicableSources(meta.type, config, meta);
+    const config = readConfig();
+    const applicable = getApplicableSources(meta.type, config, meta);
     if (applicable.length === 0) return;
 
     registerMenu(sources);
 
-    var allChannels = [];
+    const allChannels = [];
     applicable.forEach(function (s) {
       s.channels.forEach(function (ch) { allChannels.push(ch); });
     });
