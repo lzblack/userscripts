@@ -142,19 +142,23 @@
     const isbnMatch = infoText.match(/ISBN:\s*([\dXx-]+)/);
     if (isbnMatch) isbn = isbnMatch[1].replace(/-/g, '');
 
-    // 原作名；若没有原作名则尝试从「又名」中提取英文名
+    // 原作名 → 又名 → 从 h1 混合标题中提取英文部分
     let originalTitle = null;
     const originalTitleMatch = infoText.match(/原作名:\s*(.+)/);
     if (originalTitleMatch) {
       originalTitle = originalTitleMatch[1].trim();
     } else {
-      // 「又名」中的第一个斜杠分隔项里，找第一个 ASCII 为主的名字
       const alsoKnownMatch = infoText.match(/又名:\s*(.+)/);
       if (alsoKnownMatch) {
         const candidates = alsoKnownMatch[1].split(/\s*\/\s*/);
         const englishName = candidates.find((c) => /^[\x20-\x7E]+$/.test(c.trim()));
         if (englishName) originalTitle = englishName.trim();
       }
+    }
+    // 最终 fallback：从 h1 标题中提取连续英文部分（如 "路易不容易 第一季 Louie Season 1"）
+    if (!originalTitle && title) {
+      const engMatch = title.match(/([A-Za-z][A-Za-z0-9 :&'.-]{2,})/);
+      if (engMatch) originalTitle = engMatch[1].trim();
     }
 
     // 主要创作者（作者/导演/表演者/艺术家/开发/制作人）
@@ -773,24 +777,14 @@
             noMatchBoth();
             return;
           }
-          // 标题匹配：找最接近的结果，而不是盲目取第一个
-          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ''); };
+          // 精确匹配 only — normalize 后完全相等才用
+          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
           const queryNorm = normalize(titleForSearch);
           let bestLink = null;
-          let bestScore = 0;
-          for (let i = 0; i < Math.min(allResults.length, 20); i++) {
+          for (let i = 0; i < Math.min(allResults.length, 30); i++) {
             const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
             if (!nameEl) continue;
-            const resultTitle = normalize(nameEl.textContent);
-            // 精确匹配优先
-            if (resultTitle === queryNorm) { bestLink = nameEl; break; }
-            // 包含匹配：要求较短串长度 >= 较长串的 60%，防止 "pete" 匹配 "horaceandpete"
-            const longer = Math.max(resultTitle.length, queryNorm.length);
-            const shorter = Math.min(resultTitle.length, queryNorm.length);
-            if (shorter >= longer * 0.6 && (resultTitle.includes(queryNorm) || queryNorm.includes(resultTitle))) {
-              const similarity = shorter / longer;
-              if (similarity > bestScore) { bestScore = similarity; bestLink = nameEl; }
-            }
+            if (normalize(nameEl.textContent) === queryNorm) { bestLink = nameEl; break; }
           }
           if (!bestLink) {
             // 没有匹配的结果
