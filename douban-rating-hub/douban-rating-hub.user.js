@@ -215,6 +215,15 @@
     const genreEls = document.querySelectorAll('[property="v:genre"]');
     const genres = Array.from(genreEls).map((el) => el.textContent.trim());
 
+    // Fallback for drama pages (no #info, metadata in dl inside div.meta)
+    if (!infoEl && detectType() === 'drama') {
+      const metaDiv = document.querySelector('div.meta');
+      if (metaDiv) {
+        const nameEl = metaDiv.querySelector('[itemprop="name"]');
+        if (nameEl && !title) title = nameEl.textContent.trim();
+      }
+    }
+
     return {
       type,
       doubanId,
@@ -447,12 +456,12 @@
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
       '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; }',
-      '.rating-hub-label { color: #37a; text-decoration: none; min-width: 90px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
+      '.rating-hub-label { color: #37a; text-decoration: none; min-width: 110px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
       '.rating-hub-score { font-weight: bold; color: #333; }',
-      '.rating-hub-count { color: #999; }',
+      '.rating-hub-count { color: #999; margin-left: 4px; }',
       '.rating-hub-status { color: #999; }',
       '.rating-hub-status a { color: #37a; text-decoration: none; }',
       '.rating-hub-status a:hover { text-decoration: underline; }',
@@ -462,7 +471,9 @@
   }
 
   function createSlots(channels) {
-    const anchor = document.querySelector('#interest_sectl') || document.querySelector('#wrapper');
+    const anchor = document.querySelector('#interest_sectl')
+      || document.querySelector('#interest_sect_level')
+      || document.querySelector('#wrapper');
     if (!anchor) return null;
 
     const container = document.createElement('div');
@@ -676,11 +687,11 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: 'Rotten Tomatoes', version: 1,
+    key: 'rottentomatoes', label: '烂番茄', version: 1,
     types: ['movie'], requiredConfig: null,
     channels: [
-      { channelKey: 'rt_critics', label: 'RT Critics', icon: 'https://www.rottentomatoes.com/favicon.ico' },
-      { channelKey: 'rt_audience', label: 'RT Audience', icon: 'https://www.rottentomatoes.com/favicon.ico' },
+      { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
+      { channelKey: 'rt_audience', label: '烂番茄 观众', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
     ],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
@@ -1670,7 +1681,7 @@
     version: 2,
     types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
-    channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/favicon.ico' }],
+    channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/s/img/icon.png' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // 分类映射：music → album
