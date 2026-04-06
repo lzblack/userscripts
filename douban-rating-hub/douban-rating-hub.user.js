@@ -599,8 +599,7 @@
         errLink.href = result.url;
         errLink.target = '_blank';
         errLink.rel = 'noopener noreferrer';
-        const idMatch = result.url.match(/tt\d+/);
-        errLink.textContent = idMatch ? idMatch[0] + ' →' : '点击查看';
+        errLink.textContent = '查看 →';
         statusEl.appendChild(errLink);
       } else {
         statusEl.textContent = '加载失败';
@@ -776,7 +775,7 @@
             return;
           }
           // 标题匹配：找最接近的结果，而不是盲目取第一个
-          const normalize = function (s) { return (s || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ''); };
+          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ''); };
           const queryNorm = normalize(titleForSearch);
           let bestLink = null;
           for (let i = 0; i < allResults.length; i++) {
@@ -1759,7 +1758,7 @@
   sources.push({
     key: 'xiaoyuzhou',
     label: '小宇宙',
-    version: 1,
+    version: 2,
     types: ['podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'xiaoyuzhou', label: '小宇宙', icon: 'https://www.xiaoyuzhoufm.com/favicon.ico' }],
