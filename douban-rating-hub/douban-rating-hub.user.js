@@ -8,6 +8,8 @@
 // @match        https://music.douban.com/subject/*
 // @match        https://www.douban.com/game/*
 // @match        https://game.douban.com/subject/*
+// @match        https://www.douban.com/location/drama/*
+// @match        https://www.douban.com/podcast/*
 // @connect      imdb.com
 // @connect      rottentomatoes.com
 // @connect      backend.metacritic.com
@@ -19,6 +21,9 @@
 // @connect      weread.qq.com
 // @connect      api.bgm.tv
 // @connect      api.jikan.moe
+// @connect      api.discogs.com
+// @connect      itunes.apple.com
+// @connect      podcasts.apple.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -82,6 +87,9 @@
     // 社区游戏条目：https://www.douban.com/game/xxxxxxx/
     if (host === 'www.douban.com' && path.startsWith('/game/')) return 'game';
 
+    if (host === 'www.douban.com' && path.startsWith('/location/drama/')) return 'drama';
+    if (host === 'www.douban.com' && path.startsWith('/podcast/')) return 'podcast';
+
     return 'unknown';
   }
 
@@ -106,7 +114,12 @@
     // --- doubanId ---
     const subjectMatch = location.pathname.match(/\/subject\/(\d+)/);
     const gameMatch = location.pathname.match(/\/game\/(\d+)/);
-    const doubanId = subjectMatch ? subjectMatch[1] : (gameMatch ? gameMatch[1] : null);
+    const dramaMatch = location.pathname.match(/\/location\/drama\/(\d+)/);
+    const podcastMatch = location.pathname.match(/\/podcast\/(\d+)/);
+    const doubanId = subjectMatch ? subjectMatch[1]
+      : (gameMatch ? gameMatch[1]
+      : (dramaMatch ? dramaMatch[1]
+      : (podcastMatch ? podcastMatch[1] : null)));
 
     // --- title（h1 内容，去掉内嵌小字如 span.year）---
     let title = null;
@@ -1476,18 +1489,183 @@
     },
   });
 
+  // --- Discogs ---
+  sources.push({
+    key: 'discogs',
+    label: 'Discogs',
+    version: 1,
+    types: ['music'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'discogs', label: 'Discogs' }],
+    fetch: function (meta, deps) {
+      var query = meta.originalTitle || meta.title;
+      if (meta.creator) query += ' ' + meta.creator;
+      var searchUrl = 'https://api.discogs.com/database/search?q=' + encodeURIComponent(query) + '&type=master&per_page=3';
+
+      function noMatch() {
+        return { discogs: { channelKey: 'discogs', status: 'no_match', url: 'https://www.discogs.com/search?q=' + encodeURIComponent(meta.title) + '&type=master' } };
+      }
+      function noRating(url) {
+        return { discogs: { channelKey: 'discogs', status: 'no_rating', url: url } };
+      }
+
+      return deps.request(searchUrl, {
+        headers: { 'User-Agent': 'DoubanRatingHub/0.1' },
+      }).then(function (resp) {
+        if (resp.status !== 200) return noMatch();
+        var data = JSON.parse(resp.responseText);
+        if (!data.results || data.results.length === 0) return noMatch();
+
+        var master = data.results[0];
+        var masterId = master.id;
+        var masterUrl = 'https://www.discogs.com/master/' + masterId;
+
+        return deps.request('https://api.discogs.com/masters/' + masterId, {
+          headers: { 'User-Agent': 'DoubanRatingHub/0.1' },
+        }).then(function (masterResp) {
+          var masterData = JSON.parse(masterResp.responseText);
+          var mainReleaseId = masterData.main_release;
+          if (!mainReleaseId) return noRating(masterUrl);
+
+          return deps.request('https://api.discogs.com/releases/' + mainReleaseId, {
+            headers: { 'User-Agent': 'DoubanRatingHub/0.1' },
+          }).then(function (releaseResp) {
+            var releaseData = JSON.parse(releaseResp.responseText);
+            var rating = releaseData.community && releaseData.community.rating;
+            if (!rating || !rating.average || rating.count === 0) return noRating(masterUrl);
+
+            return {
+              discogs: {
+                channelKey: 'discogs',
+                status: 'success',
+                score: rating.average,
+                scoreMax: 5,
+                displayValue: rating.average.toFixed(2) + '/5',
+                count: rating.count,
+                countText: rating.count.toLocaleString(),
+                url: masterUrl,
+                matchedBy: 'title',
+                matchConfidence: 'fuzzy',
+                externalId: String(masterId),
+              },
+            };
+          });
+        });
+      }).catch(function () { return noMatch(); });
+    },
+  });
+
+  // --- Apple Podcasts ---
+  sources.push({
+    key: 'apple_podcasts',
+    label: 'Apple Podcasts',
+    version: 1,
+    types: ['podcast'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'apple_podcasts', label: 'Apple Podcasts' }],
+    fetch: function (meta, deps) {
+      var searchUrl = 'https://itunes.apple.com/search?term=' + encodeURIComponent(meta.title) + '&media=podcast&country=us&limit=5';
+
+      function noMatch() {
+        return { apple_podcasts: { channelKey: 'apple_podcasts', status: 'no_match', url: 'https://podcasts.apple.com/us/search?term=' + encodeURIComponent(meta.title) } };
+      }
+
+      return deps.request(searchUrl, {
+        headers: { 'Accept': 'application/json' },
+      }).then(function (resp) {
+        var data = JSON.parse(resp.responseText);
+        if (!data.results || data.results.length === 0) return noMatch();
+
+        // 按标题匹配最佳结果
+        var normalizedTitle = meta.title.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
+        var best = data.results[0];
+        for (var i = 0; i < data.results.length; i++) {
+          var nt = data.results[i].trackName.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
+          if (nt === normalizedTitle || nt.indexOf(normalizedTitle) !== -1 || normalizedTitle.indexOf(nt) !== -1) {
+            best = data.results[i];
+            break;
+          }
+        }
+
+        var trackId = best.trackId;
+        var podcastUrl = 'https://podcasts.apple.com/us/podcast/id' + trackId;
+
+        return deps.request(podcastUrl).then(function (pageResp) {
+          var doc = deps.parseHTML(pageResp.responseText);
+
+          // 优先尝试 JSON-LD aggregateRating
+          var scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+          for (var j = 0; j < scripts.length; j++) {
+            try {
+              var ld = JSON.parse(scripts[j].textContent);
+              if (ld.aggregateRating) {
+                var score = parseFloat(ld.aggregateRating.ratingValue);
+                var count = parseInt(ld.aggregateRating.reviewCount || ld.aggregateRating.ratingCount, 10) || 0;
+                if (score > 0) {
+                  return {
+                    apple_podcasts: {
+                      channelKey: 'apple_podcasts',
+                      status: 'success',
+                      score: score,
+                      scoreMax: 5,
+                      displayValue: score.toFixed(1) + '/5',
+                      count: count,
+                      countText: count.toLocaleString(),
+                      url: podcastUrl,
+                      matchedBy: 'title',
+                      matchConfidence: 'fuzzy',
+                      externalId: String(trackId),
+                    },
+                  };
+                }
+              }
+            } catch (e) { /* skip */ }
+          }
+
+          // 回退：aria-label 评分元素
+          var ratingEl = doc.querySelector('[data-testid="show-hero__rating"]');
+          if (ratingEl) {
+            var ariaMatch = (ratingEl.getAttribute('aria-label') || '').match(/([\d.]+)\s*out of\s*5/);
+            var countMatch = (ratingEl.getAttribute('aria-label') || '').match(/([\d,]+)\s*ratings/);
+            if (ariaMatch) {
+              var s = parseFloat(ariaMatch[1]);
+              var c = countMatch ? parseInt(countMatch[1].replace(/,/g, ''), 10) : 0;
+              return {
+                apple_podcasts: {
+                  channelKey: 'apple_podcasts',
+                  status: 'success',
+                  score: s,
+                  scoreMax: 5,
+                  displayValue: s.toFixed(1) + '/5',
+                  count: c,
+                  countText: c.toLocaleString(),
+                  url: podcastUrl,
+                  matchedBy: 'title',
+                  matchConfidence: 'fuzzy',
+                  externalId: String(trackId),
+                },
+              };
+            }
+          }
+
+          return { apple_podcasts: { channelKey: 'apple_podcasts', status: 'no_rating', url: podcastUrl } };
+        });
+      }).catch(function () { return noMatch(); });
+    },
+  });
+
   // --- NeoDB ---
   sources.push({
     key: 'neodb',
     label: 'NeoDB',
     version: 2,
-    types: ['book', 'movie', 'music', 'game'],
+    types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'neodb', label: 'NeoDB' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         // 分类映射：music → album
-        var categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game' };
+        var categoryMap = { book: 'book', movie: 'movie', music: 'album', game: 'game', drama: 'performance', podcast: 'podcast' };
         var category = categoryMap[meta.type] || 'all';
 
         // 搜索查询瀑布：豆瓣页面 URL → originalTitle → title
