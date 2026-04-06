@@ -286,7 +286,7 @@
   function setCache(doubanId, channelKey, sourceVersion, channelResult) {
     const status = channelResult && channelResult.status;
     // エラー系・スキップ系はキャッシュしない
-    if (!status || status === 'error' || status === 'disabled' || status === 'coexist_skip') return;
+    if (!status || status === 'error' || status === 'disabled') return;
 
     let ttl;
     if (status === 'rate_limited') {
@@ -342,100 +342,248 @@
     deps.storage.set('rh:config', config);
   }
 
+  let activeConfigKeydownHandler = null;
+
+  function getSourceTypeLabels(source) {
+    const typeLabels = {
+      movie: '影视',
+      book: '图书',
+      music: '音乐',
+      game: '游戏',
+      drama: '舞台剧',
+      podcast: '播客',
+    };
+    return (source.types || [])
+      .map(function (type) { return typeLabels[type] || type; })
+      .join(' / ');
+  }
+
+  function isSourceRelevantForMeta(source, meta) {
+    if (!source.types || source.types.indexOf(meta.type) === -1) return false;
+    if (source.key === 'anydb' && (!meta.genres || meta.genres.indexOf('动画') === -1)) return false;
+    return true;
+  }
+
+  function buildSourceToggleSection(title, description, items, config) {
+    if (!items || items.length === 0) return null;
+
+    const section = document.createElement('section');
+    section.className = 'rh-config-section';
+
+    const heading = document.createElement('h4');
+    heading.className = 'rh-config-section-title';
+    heading.textContent = title;
+    section.appendChild(heading);
+
+    if (description) {
+      const desc = document.createElement('p');
+      desc.className = 'rh-config-section-desc';
+      desc.textContent = description;
+      section.appendChild(desc);
+    }
+
+    const list = document.createElement('div');
+    list.className = 'rh-config-source-list';
+    section.appendChild(list);
+
+    const checkboxes = {};
+    items.forEach(function (src) {
+      const row = document.createElement('label');
+      row.className = 'rh-config-source';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'rh-config-checkbox';
+      cb.checked = config.enabledSources[src.key] !== false;
+      checkboxes[src.key] = cb;
+
+      const textWrap = document.createElement('span');
+      textWrap.className = 'rh-config-source-text';
+
+      const name = document.createElement('span');
+      name.className = 'rh-config-source-name';
+      name.textContent = src.label || src.key;
+
+      const meta = document.createElement('span');
+      meta.className = 'rh-config-source-meta';
+      meta.textContent = getSourceTypeLabels(src);
+
+      textWrap.appendChild(name);
+      if (meta.textContent) textWrap.appendChild(meta);
+
+      row.appendChild(cb);
+      row.appendChild(textWrap);
+      list.appendChild(row);
+    });
+
+    section._checkboxes = checkboxes;
+    return section;
+  }
+
   function openConfigPanel(sources) {
+    ensureStyles();
+
     // 面板已存在则关闭（Toggle 行为）
     const existing = document.getElementById('rh-config-overlay');
     if (existing) {
+      if (activeConfigKeydownHandler) {
+        document.removeEventListener('keydown', activeConfigKeydownHandler);
+        activeConfigKeydownHandler = null;
+      }
       existing.remove();
       return;
     }
 
     const config = readConfig();
+    const meta = extractMeta();
+    const currentSources = [];
+    const otherSources = [];
+    const previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    sources.forEach(function (src) {
+      if (isSourceRelevantForMeta(src, meta)) currentSources.push(src);
+      else otherSources.push(src);
+    });
 
     // 遮罩层
     const overlay = document.createElement('div');
     overlay.id = 'rh-config-overlay';
-    overlay.style.cssText = [
-      'position:fixed', 'inset:0', 'background:rgba(0,0,0,.45)',
-      'z-index:999999', 'display:flex', 'align-items:center', 'justify-content:center',
-    ].join(';');
+    overlay.className = 'rh-config-overlay';
 
     // 面板
     const panel = document.createElement('div');
-    panel.style.cssText = [
-      'background:#fff', 'border-radius:8px', 'padding:24px 28px',
-      'min-width:320px', 'max-width:460px', 'width:90vw',
-      'font-family:sans-serif', 'font-size:14px', 'line-height:1.6',
-      'box-shadow:0 8px 32px rgba(0,0,0,.2)',
-    ].join(';');
+    panel.className = 'rh-config-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-labelledby', 'rh-config-title');
+    panel.setAttribute('tabindex', '-1');
 
     // 标题
     const heading = document.createElement('h3');
-    heading.textContent = '评分汇 设置';
-    heading.style.cssText = 'margin:0 0 16px;font-size:16px;font-weight:600;';
+    heading.id = 'rh-config-title';
+    heading.className = 'rh-config-title';
+    heading.textContent = '评分汇设置';
     panel.appendChild(heading);
 
+    const intro = document.createElement('p');
+    intro.className = 'rh-config-intro';
+    intro.textContent = '这里仅控制评分来源的显示方式，条目主内容仍保持豆瓣原样。';
+    panel.appendChild(intro);
+
     // TMDB API Key 输入框
+    const tmdbSection = document.createElement('section');
+    tmdbSection.className = 'rh-config-section';
+
+    const tmdbHeading = document.createElement('h4');
+    tmdbHeading.className = 'rh-config-section-title';
+    tmdbHeading.textContent = 'TMDB Key（可选）';
+    tmdbSection.appendChild(tmdbHeading);
+
+    const tmdbHelp = document.createElement('p');
+    tmdbHelp.id = 'rh-config-tmdb-help';
+    tmdbHelp.className = 'rh-config-section-desc';
+    tmdbHelp.textContent = '只在电影/剧集页用于显示 TMDB 评分。不填写也能正常使用，只是不显示这一项。';
+    tmdbSection.appendChild(tmdbHelp);
+
     const tmdbLabel = document.createElement('label');
-    tmdbLabel.style.cssText = 'display:block;margin-bottom:4px;font-weight:500;';
+    tmdbLabel.className = 'rh-config-field-label';
     tmdbLabel.textContent = 'TMDB API Key';
     const tmdbInput = document.createElement('input');
     tmdbInput.type = 'text';
+    tmdbInput.autocomplete = 'off';
+    tmdbInput.spellcheck = false;
     tmdbInput.value = config.tmdbApiKey || '';
-    tmdbInput.placeholder = '留空则跳过 TMDB 来源';
-    tmdbInput.style.cssText = [
-      'display:block', 'width:100%', 'box-sizing:border-box',
-      'padding:6px 10px', 'border:1px solid #ccc', 'border-radius:4px',
-      'margin-bottom:16px', 'font-size:13px',
-    ].join(';');
-    panel.appendChild(tmdbLabel);
-    panel.appendChild(tmdbInput);
+    tmdbInput.placeholder = '留空即可';
+    tmdbInput.className = 'rh-config-input';
+    tmdbInput.setAttribute('aria-describedby', 'rh-config-tmdb-help');
+    tmdbSection.appendChild(tmdbLabel);
+    tmdbSection.appendChild(tmdbInput);
+    panel.appendChild(tmdbSection);
 
     // 数据来源启用/禁用
     if (sources && sources.length > 0) {
-      const sourcesLabel = document.createElement('p');
-      sourcesLabel.style.cssText = 'margin:0 0 8px;font-weight:500;';
-      sourcesLabel.textContent = '启用的评分来源';
-      panel.appendChild(sourcesLabel);
+      const currentLabelMap = {
+        movie: '当前影视页会显示的来源',
+        book: '当前图书页会显示的来源',
+        music: '当前音乐页会显示的来源',
+        game: '当前游戏页会显示的来源',
+        drama: '当前舞台剧页会显示的来源',
+        podcast: '当前播客页会显示的来源',
+      };
 
-      const checkboxes = {};
-      sources.forEach(function (src) {
-        const row = document.createElement('label');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;';
+      const currentSection = buildSourceToggleSection(
+        currentLabelMap[meta.type] || '当前页面会显示的来源',
+        '先列出和当前页面最相关的来源，避免一次看到过多设置。',
+        currentSources,
+        config
+      );
+      if (currentSection) panel.appendChild(currentSection);
 
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        // 默认启用（enabledSources 中未设置 false 时视为已启用）
-        cb.checked = config.enabledSources[src.key] !== false;
-        checkboxes[src.key] = cb;
+      if (otherSources.length > 0) {
+        const disclosure = document.createElement('details');
+        disclosure.className = 'rh-config-disclosure';
 
-        const cbLabel = document.createElement('span');
-        cbLabel.textContent = src.label || src.key;
+        const summary = document.createElement('summary');
+        summary.className = 'rh-config-disclosure-summary';
+        summary.textContent = '其他条目类型的来源';
+        disclosure.appendChild(summary);
 
-        row.appendChild(cb);
-        row.appendChild(cbLabel);
-        panel.appendChild(row);
+        const otherSection = buildSourceToggleSection(
+          '其他来源',
+          '这些来源不会出现在当前页面，但会影响书、影、音、游戏等其他条目页。',
+          otherSources,
+          config
+        );
+        if (otherSection) disclosure.appendChild(otherSection);
+        panel.appendChild(disclosure);
+      }
+
+      const mergedCheckboxes = {};
+      panel.querySelectorAll('.rh-config-section, .rh-config-disclosure').forEach(function (section) {
+        if (!section._checkboxes) return;
+        Object.keys(section._checkboxes).forEach(function (key) {
+          mergedCheckboxes[key] = section._checkboxes[key];
+        });
       });
-
-      // 保存按钮回调需要能读到 checkboxes
-      panel._checkboxes = checkboxes;
+      panel._checkboxes = mergedCheckboxes;
     }
+
+    const footnote = document.createElement('p');
+    footnote.className = 'rh-config-footnote';
+    footnote.textContent = '来源开关会在刷新当前页面后生效。';
+    panel.appendChild(footnote);
 
     // 按钮行
     const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:20px;';
+    btnRow.className = 'rh-config-actions';
 
     const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = '取消';
-    cancelBtn.style.cssText = 'padding:6px 18px;border:1px solid #ccc;border-radius:4px;cursor:pointer;background:#f5f5f5;';
-    cancelBtn.addEventListener('click', function () { overlay.remove(); });
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = '关闭';
+    cancelBtn.className = 'rh-config-button rh-config-button-secondary';
 
     const saveBtn = document.createElement('button');
-    saveBtn.textContent = '保存';
-    saveBtn.style.cssText = [
-      'padding:6px 18px', 'border:none', 'border-radius:4px',
-      'cursor:pointer', 'background:#e9722e', 'color:#fff', 'font-weight:600',
-    ].join(';');
+    saveBtn.type = 'button';
+    saveBtn.textContent = '保存并刷新';
+    saveBtn.className = 'rh-config-button rh-config-button-primary';
+
+    function closeOverlay() {
+      if (activeConfigKeydownHandler) {
+        document.removeEventListener('keydown', activeConfigKeydownHandler);
+        activeConfigKeydownHandler = null;
+      }
+      overlay.remove();
+      if (previousActiveElement) previousActiveElement.focus();
+    }
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeOverlay();
+      }
+    }
+
+    cancelBtn.addEventListener('click', function () { closeOverlay(); });
     saveBtn.addEventListener('click', function () {
       const newConfig = readConfig();
       newConfig.tmdbApiKey = tmdbInput.value.trim();
@@ -445,7 +593,7 @@
         });
       }
       saveConfig(newConfig);
-      overlay.remove();
+      closeOverlay();
       location.reload();
     });
 
@@ -455,11 +603,14 @@
 
     // 点击遮罩背景关闭
     overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) overlay.remove();
+      if (e.target === overlay) closeOverlay();
     });
 
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
+    activeConfigKeydownHandler = onKeyDown;
+    document.addEventListener('keydown', activeConfigKeydownHandler);
+    tmdbInput.focus();
   }
 
   function registerMenu(sources) {
@@ -475,18 +626,53 @@
     const style = document.createElement('style');
     style.id = 'rating-hub-style';
     style.textContent = [
-      '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
-      '.rating-hub-row { display: flex; align-items: center; gap: 4px; line-height: 2; white-space: nowrap; }',
-      '.rating-hub-label { color: #37a; text-decoration: none; width: 90px; flex-shrink: 0; border-radius: 3px; padding: 0 2px; transition: color 0.2s, background-color 0.2s; font-size: 12px; }',
-      '.rating-hub-score { font-weight: bold; color: #333; }',
+      '.rating-hub-container { margin-top: 8px; font-size: 12px; color: #333; }',
+      '.rating-hub-row { display: flex; align-items: baseline; flex-wrap: nowrap; column-gap: 6px; line-height: 1.75; }',
+      '.rating-hub-label { display: inline-flex; align-items: center; min-width: 90px; width: 90px; max-width: 90px; color: #37a; text-decoration: none; border-radius: 3px; padding: 0 2px; transition: color 0.16s ease-out, background-color 0.16s ease-out, box-shadow 0.16s ease-out; font-size: 12px; flex-shrink: 0; }',
+      '.rating-hub-score { display: inline-flex; align-items: baseline; gap: 1px; color: #2f2f2f; font-variant-numeric: tabular-nums; min-width: 3.75em; letter-spacing: 0.01em; }',
+      '.rating-hub-score-main { font-weight: 700; color: #2f2f2f; }',
+      '.rating-hub-score-suffix { font-size: 11px; font-weight: 500; color: #8f8f8f; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
-      '.rating-hub-count { color: #999; margin-left: -2px; }',
-      '.rating-hub-status { color: #999; }',
+      '.rating-hub-label:focus-visible, .rating-hub-status a:focus-visible, .rh-config-button:focus-visible, .rh-config-input:focus-visible, .rh-config-checkbox:focus-visible, .rh-config-disclosure-summary:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(55, 119, 170, 0.28); background-color: rgba(55, 119, 170, 0.08); }',
+      '.rating-hub-count { color: #777; margin-left: 0; font-variant-numeric: tabular-nums; min-width: 0; white-space: nowrap; }',
+      '.rating-hub-status { color: #666; min-width: 0; white-space: nowrap; }',
       '.rating-hub-status a { color: #37a; text-decoration: none; }',
       '.rating-hub-status a:hover { text-decoration: underline; }',
-      '.rating-hub-icon { width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }',
+      '.rating-hub-row[data-status="loading"] .rating-hub-status, .rating-hub-row[data-status="no_match"] .rating-hub-status, .rating-hub-row[data-status="no_rating"] .rating-hub-status { color: #777; }',
+      '.rating-hub-row[data-status="rate_limited"] .rating-hub-status, .rating-hub-row[data-status="error"] .rating-hub-status { color: #7a6a55; }',
+      '.rating-hub-row[data-status="disabled"] .rating-hub-status { color: #666; }',
+      '.rating-hub-icon { width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; border-radius: 2px; flex-shrink: 0; }',
+      '.rh-config-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.28); z-index: 999999; }',
+      '.rh-config-panel { width: min(520px, calc(100vw - 24px)); max-height: min(78vh, 720px); overflow: auto; background: #fff; color: #333; border: 1px solid #d8d2c4; border-radius: 8px; box-shadow: 0 14px 34px rgba(26, 26, 26, 0.16); padding: 20px 22px 18px; font: 13px/1.65 Helvetica, Arial, sans-serif; }',
+      '.rh-config-title { margin: 0; font-size: 16px; font-weight: 700; color: #494949; }',
+      '.rh-config-intro { margin: 8px 0 14px; color: #666; }',
+      '.rh-config-section { margin-top: 14px; }',
+      '.rh-config-section-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: #494949; }',
+      '.rh-config-section-desc { margin: 0 0 10px; color: #777; }',
+      '.rh-config-field-label { display: block; margin-bottom: 6px; color: #555; font-weight: 600; }',
+      '.rh-config-input { display: block; width: 100%; box-sizing: border-box; padding: 7px 10px; border: 1px solid #c9c3b8; border-radius: 4px; color: #333; background: #fff; transition: border-color 0.16s ease-out, box-shadow 0.16s ease-out; }',
+      '.rh-config-input:hover { border-color: #b5aea1; }',
+      '.rh-config-source-list { display: grid; gap: 6px; }',
+      '.rh-config-source { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: 6px; cursor: pointer; transition: background-color 0.16s ease-out; }',
+      '.rh-config-source:hover { background: #f7f4ed; }',
+      '.rh-config-checkbox { margin-top: 2px; accent-color: #4f946e; }',
+      '.rh-config-source-text { display: flex; min-width: 0; flex: 1; align-items: baseline; justify-content: space-between; gap: 10px; }',
+      '.rh-config-source-name { color: #333; }',
+      '.rh-config-source-meta { color: #999; white-space: nowrap; }',
+      '.rh-config-disclosure { margin-top: 14px; border-top: 1px solid #eee9dd; padding-top: 12px; }',
+      '.rh-config-disclosure-summary { color: #37a; cursor: pointer; user-select: none; }',
+      '.rh-config-disclosure-summary:hover { text-decoration: underline; }',
+      '.rh-config-footnote { margin: 14px 0 0; color: #999; }',
+      '.rh-config-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }',
+      '.rh-config-button { min-height: 34px; padding: 0 16px; border-radius: 4px; border: 1px solid transparent; cursor: pointer; transition: background-color 0.16s ease-out, border-color 0.16s ease-out, color 0.16s ease-out; }',
+      '.rh-config-button-secondary { border-color: #d8d2c4; background: #fff; color: #666; }',
+      '.rh-config-button-secondary:hover { border-color: #c9c3b8; background: #faf8f2; }',
+      '.rh-config-button-primary { border-color: #4f946e; background: #5c9d78; color: #fff; font-weight: 600; }',
+      '.rh-config-button-primary:hover { border-color: #467f61; background: #508a69; }',
+      '@media (max-width: 480px) { .rating-hub-container { font-size: 13px; } .rating-hub-label { min-width: 84px; width: 84px; max-width: 84px; } .rating-hub-score { min-width: 3.4em; } .rh-config-overlay { padding: 12px; } .rh-config-panel { max-height: calc(100vh - 24px); padding: 16px; } .rh-config-source-text { display: block; } .rh-config-source-meta { display: block; margin-top: 2px; white-space: normal; } .rh-config-actions { flex-wrap: wrap; } .rh-config-button { flex: 1 1 140px; } }',
+      '@media (prefers-reduced-motion: reduce) { .rating-hub-label, .rh-config-source, .rh-config-input, .rh-config-button { transition: none; } }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -507,6 +693,7 @@
       const row = document.createElement('div');
       row.className = 'rating-hub-row';
       row.setAttribute('data-channel', ch.channelKey);
+      row.setAttribute('data-status', 'loading');
 
       const label = document.createElement('span');
       label.className = 'rating-hub-label no-link';
@@ -546,6 +733,7 @@
     }
 
     const status = result.status;
+    row.setAttribute('data-status', status || 'error');
 
     if (status === 'success') {
       // Label → 可点击链接
@@ -559,7 +747,25 @@
 
       const scoreEl = document.createElement('span');
       scoreEl.className = 'rating-hub-score';
-      scoreEl.textContent = result.displayValue || result.score;
+      const scoreText = String(result.displayValue || result.score);
+      const scoreMatch = scoreText.match(/^([^/]+)(\/.+)$/);
+      if (scoreMatch) {
+        const mainEl = document.createElement('span');
+        mainEl.className = 'rating-hub-score-main';
+        mainEl.textContent = scoreMatch[1];
+
+        const suffixEl = document.createElement('span');
+        suffixEl.className = 'rating-hub-score-suffix';
+        suffixEl.textContent = scoreMatch[2];
+
+        scoreEl.appendChild(mainEl);
+        scoreEl.appendChild(suffixEl);
+      } else {
+        const mainEl = document.createElement('span');
+        mainEl.className = 'rating-hub-score-main';
+        mainEl.textContent = scoreText;
+        scoreEl.appendChild(mainEl);
+      }
       row.appendChild(scoreEl);
 
       if (result.count) {
@@ -593,7 +799,7 @@
     } else if (status === 'rate_limited') {
       const statusEl = document.createElement('span');
       statusEl.className = 'rating-hub-status';
-      statusEl.textContent = '请求频繁，稍后重试';
+      statusEl.textContent = '访问过快，稍后再试';
       row.appendChild(statusEl);
 
     } else if (status === 'disabled') {
@@ -601,7 +807,7 @@
       statusEl.className = 'rating-hub-status';
       const configLink = document.createElement('a');
       configLink.href = '#';
-      configLink.textContent = '未配置 API Key';
+      configLink.textContent = '配置 TMDB Key';
       configLink.addEventListener('click', function (e) {
         e.preventDefault();
         openConfigPanel(sources);
@@ -609,11 +815,6 @@
       statusEl.appendChild(configLink);
       row.appendChild(statusEl);
 
-    } else if (status === 'coexist_skip') {
-      const statusEl = document.createElement('span');
-      statusEl.className = 'rating-hub-status';
-      statusEl.textContent = '已由其他脚本提供';
-      row.appendChild(statusEl);
 
     } else {
       // error (and any unknown status)
@@ -629,7 +830,7 @@
         a.innerHTML = label.innerHTML;
         row.replaceChild(a, label);
       }
-      statusEl.textContent = '网络受限';
+      statusEl.textContent = '暂时无法访问';
       row.appendChild(statusEl);
     }
   }
@@ -2040,15 +2241,9 @@
   });
 
   // ============================================================
-  // Scheduler — 并发抓取、缓存、限流、共存检测
+  // Scheduler — 并发抓取、缓存、限流
   // ============================================================
 
-  function checkCoexistence() {
-    if (document.getElementById('douban-neodb-rating-style')) return true;
-    const thirdParty = document.querySelector('.douban-thirdparty-rating');
-    if (thirdParty && thirdParty.textContent.indexOf('NeoDB') !== -1) return true;
-    return false;
-  }
 
   function isCooldownActive(sourceKey) {
     const entry = deps.storage.get('rh:cooldown:' + sourceKey);
@@ -2072,12 +2267,6 @@
         channelKeys.forEach(function (key) {
           onChannelReady(key, Object.assign({ channelKey: key }, result));
         });
-      }
-
-      // Pre-flight: NeoDB 共存检测
-      if (source.key === 'neodb' && checkCoexistence()) {
-        emitAll({ status: 'coexist_skip' });
-        return;
       }
 
       // Pre-flight: 必要配置缺失
