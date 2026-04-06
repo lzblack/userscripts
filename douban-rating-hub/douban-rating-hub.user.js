@@ -962,7 +962,7 @@
 
   // --- Letterboxd ---
   sources.push({
-    key: 'letterboxd', label: 'Letterboxd', version: 2,
+    key: 'letterboxd', label: 'Letterboxd', version: 3,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
