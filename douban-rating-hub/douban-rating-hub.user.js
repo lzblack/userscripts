@@ -24,6 +24,7 @@
 // @connect      api.discogs.com
 // @connect      itunes.apple.com
 // @connect      podcasts.apple.com
+// @connect      xyzrank.eddiehe.top
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -825,15 +826,22 @@
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         const titleForSlug = meta.originalTitle || meta.title || '';
+        const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
+        const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+
+        // If title contains no ASCII letters it's CJK-only — Metacritic has no match
+        if (!titleForSlug || !/[a-zA-Z]/.test(titleForSlug)) {
+          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+          return;
+        }
+
         // Build slug: lowercase, remove non-alphanumeric except spaces, replace spaces with hyphens
         const slug = titleForSlug
           .toLowerCase()
-          .replace(/[^a-z0-9 ]/g, '')
+          .replace(/[^a-z0-9\s]/g, '')
           .trim()
-          .replace(/\s+/g, '-');
-
-        const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
-        const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+          .replace(/\s+/g, '-')
+          .replace(/^-+|-+$/g, '');
 
         if (!slug) {
           resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
@@ -956,6 +964,58 @@
           };
         }
 
+        // THIRD FALLBACK: search by title
+        function tryTitleSearch() {
+          const titleSearchUrl = 'https://letterboxd.com/search/films/' + encodeURIComponent(meta.originalTitle || meta.title || '') + '/';
+          deps.request(titleSearchUrl).then(function (searchResp) {
+            if (searchResp.status < 200 || searchResp.status >= 300) {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
+              return;
+            }
+            const searchDoc = deps.parseHTML(searchResp.responseText);
+            const filmLink = searchDoc.querySelector('.results .film-detail-content a')
+              || searchDoc.querySelector('a[href*="/film/"]');
+            if (!filmLink) {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
+              return;
+            }
+            let filmUrl = filmLink.getAttribute('href');
+            if (!filmUrl.startsWith('http')) filmUrl = 'https://letterboxd.com' + filmUrl;
+            deps.request(filmUrl).then(function (filmResp) {
+              const finalUrl = filmResp.finalUrl || filmUrl;
+              const parsed = parseFromPage(filmResp.responseText, finalUrl);
+              if (parsed && !isNaN(parsed.score)) {
+                resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+              } else {
+                resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
+              }
+            }).catch(function () {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
+            });
+          }).catch(function () {
+            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
+          });
+        }
+
+        // SECOND FALLBACK: fetch /imdb/{id}/ page directly
+        function tryImdbPage() {
+          deps.request(fallbackUrl).then(function (pageResp) {
+            if (pageResp.status === 403) {
+              tryTitleSearch();
+              return;
+            }
+            const finalUrl = pageResp.finalUrl || fallbackUrl;
+            const parsed = parseFromPage(pageResp.responseText, finalUrl);
+            if (parsed && !isNaN(parsed.score)) {
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+            } else {
+              tryTitleSearch();
+            }
+          }).catch(function () {
+            tryTitleSearch();
+          });
+        }
+
         // PRIMARY: CSI ratings-summary endpoint
         deps.request(csiUrl).then(function (resp) {
           if (resp.status >= 200 && resp.status < 300) {
@@ -974,31 +1034,11 @@
               return;
             }
           }
-          // FALLBACK: full page fetch
-          deps.request(fallbackUrl).then(function (pageResp) {
-            const finalUrl = pageResp.finalUrl || fallbackUrl;
-            const parsed = parseFromPage(pageResp.responseText, finalUrl);
-            if (parsed && !isNaN(parsed.score)) {
-              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
-            } else {
-              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
-            }
-          }).catch(function () {
-            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
-          });
+          // CSI returned non-success or no rating data — try IMDB page
+          tryImdbPage();
         }).catch(function () {
-          // CSI request failed entirely, try fallback
-          deps.request(fallbackUrl).then(function (pageResp) {
-            const finalUrl = pageResp.finalUrl || fallbackUrl;
-            const parsed = parseFromPage(pageResp.responseText, finalUrl);
-            if (parsed && !isNaN(parsed.score)) {
-              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
-            } else {
-              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
-            }
-          }).catch(function () {
-            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: fallbackUrl } });
-          });
+          // CSI request failed entirely — try IMDB page
+          tryImdbPage();
         });
       });
     },
@@ -1680,6 +1720,67 @@
 
           return { apple_podcasts: { channelKey: 'apple_podcasts', status: 'no_rating', url: podcastUrl } };
         });
+      }).catch(function () { return noMatch(); });
+    },
+  });
+
+  // --- 小宇宙 ---
+  sources.push({
+    key: 'xiaoyuzhou',
+    label: '小宇宙',
+    version: 1,
+    types: ['podcast'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'xiaoyuzhou', label: '小宇宙', icon: 'https://www.xiaoyuzhoufm.com/favicon.ico' }],
+    fetch: function (meta, deps) {
+      function noMatch() {
+        return { xiaoyuzhou: { channelKey: 'xiaoyuzhou', status: 'no_match', url: 'https://xyzrank.com/' } };
+      }
+
+      return deps.request('https://xyzrank.eddiehe.top/full.json').then(function (resp) {
+        const raw = JSON.parse(resp.responseText);
+        const podcasts = raw.data && raw.data.podcasts;
+        if (!podcasts) return noMatch();
+
+        // Normalize: lowercase, keep word chars and CJK only
+        function norm(t) {
+          return t.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, '');
+        }
+        const normalizedTitle = norm(meta.title || '');
+        let match = null;
+
+        // Exact match first, then partial
+        for (let i = 0; i < podcasts.length; i++) {
+          if (norm(podcasts[i].name) === normalizedTitle) { match = podcasts[i]; break; }
+        }
+        if (!match) {
+          for (let i = 0; i < podcasts.length; i++) {
+            const nt = norm(podcasts[i].name);
+            if (nt.includes(normalizedTitle) || normalizedTitle.includes(nt)) { match = podcasts[i]; break; }
+          }
+        }
+        if (!match) return noMatch();
+
+        const xyzLink = match.links && match.links.find(function (l) { return l.name === 'xyz'; });
+        const xyzUrl = xyzLink ? xyzLink.url : null;
+        const avgPlay = match.avgPlayCount || 0;
+        const rank = match.rank;
+
+        return {
+          xiaoyuzhou: {
+            channelKey: 'xiaoyuzhou',
+            status: 'success',
+            score: rank,
+            scoreMax: null,
+            displayValue: '榜 #' + rank,
+            count: avgPlay,
+            countText: '均播 ' + (avgPlay >= 10000 ? (avgPlay / 10000).toFixed(1) + '万' : avgPlay.toLocaleString()),
+            url: xyzUrl || 'https://xyzrank.com/',
+            matchedBy: 'title',
+            matchConfidence: 'fuzzy',
+            externalId: match.id,
+          },
+        };
       }).catch(function () { return noMatch(); });
     },
   });
