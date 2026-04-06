@@ -17,7 +17,8 @@
 // @connect      goodreads.com
 // @connect      amazon.com
 // @connect      weread.qq.com
-// @connect      anydb.depar.cc
+// @connect      api.bgm.tv
+// @connect      api.jikan.moe
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -574,8 +575,8 @@
       if (!source.types || source.types.indexOf(type) === -1) return false;
       // 用户已禁用
       if (config.enabledSources[source.key] === false) return false;
-      // anydb 仅在动画类型时启用
-      if (source.key === 'anydb' && meta.genres.indexOf('动画') === -1) return false;
+      // bangumi/mal 仅在动画类型时启用
+      if ((source.key === 'bangumi' || source.key === 'mal') && (!meta.genres || meta.genres.indexOf('动画') === -1)) return false;
       return true;
     });
   }
@@ -1049,81 +1050,124 @@
     },
   });
 
-  // --- AnyDB (AniDB + Bangumi + MAL) ---
+  // --- Bangumi ---
   sources.push({
-    key: 'anydb', label: 'AnyDB', version: 1,
+    key: 'bangumi',
+    label: 'Bangumi',
+    version: 1,
     types: ['movie'],
     requiredConfig: null,
-    channels: [
-      { channelKey: 'anidb', label: 'AniDB' },
-      { channelKey: 'bangumi', label: 'Bangumi' },
-      { channelKey: 'mal', label: 'MAL' },
-    ],
+    channels: [{ channelKey: 'bangumi', label: 'Bangumi' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        var apiUrl = 'https://anydb.depar.cc/anime/query?_cf_cache=1&douban=' + encodeURIComponent(meta.doubanId);
+        // Search: https://api.bgm.tv/search/subject/{keyword}?type=2&responseGroup=small
+        // type=2 → anime; MUST send User-Agent header (otherwise 403)
+        var keyword = encodeURIComponent(meta.title || '');
+        var apiUrl = 'https://api.bgm.tv/search/subject/' + keyword + '?type=2&responseGroup=small';
 
-        function errorAll() {
-          resolve({
-            anidb: { channelKey: 'anidb', status: 'error' },
-            bangumi: { channelKey: 'bangumi', status: 'error' },
-            mal: { channelKey: 'mal', status: 'error' },
-          });
+        function noMatch() {
+          resolve({ bangumi: { channelKey: 'bangumi', status: 'no_match' } });
+        }
+        function errResult() {
+          resolve({ bangumi: { channelKey: 'bangumi', status: 'error' } });
         }
 
-        function buildChannel(channelKey, matched, pageUrl) {
-          if (!matched) {
-            return { channelKey: channelKey, status: 'no_match', url: pageUrl };
-          }
-          var score = parseFloat(matched.score != null ? matched.score : matched.rating);
-          if (isNaN(score) || score <= 0) {
-            return { channelKey: channelKey, status: 'no_rating', url: pageUrl };
-          }
-          return {
-            channelKey: channelKey,
-            status: 'success',
-            score: score,
-            scoreMax: 10,
-            displayValue: score.toFixed(2) + '/10',
-            count: null,
-            countText: null,
-            url: pageUrl,
-            matchedBy: 'douban_id',
-            matchConfidence: 'exact',
-            externalId: String(matched.id),
-          };
+        deps.request(apiUrl, {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'douban-rating-hub/1.0 (https://github.com/lzblack)',
+          },
+        }).then(function (resp) {
+          if (resp.status < 200 || resp.status >= 300) { errResult(); return; }
+          try {
+            var data = JSON.parse(resp.responseText);
+            var list = data.list || [];
+            // find first result with type=2 (anime)
+            var item = null;
+            for (var i = 0; i < list.length; i++) {
+              if (list[i].type === 2) { item = list[i]; break; }
+            }
+            if (!item) { noMatch(); return; }
+            var score = item.rating ? parseFloat(item.rating.score) : NaN;
+            var total = item.rating ? item.rating.total : null;
+            var pageUrl = 'https://bgm.tv/subject/' + item.id;
+            if (isNaN(score) || score <= 0) {
+              resolve({ bangumi: { channelKey: 'bangumi', status: 'no_rating', url: pageUrl } });
+              return;
+            }
+            resolve({
+              bangumi: {
+                channelKey: 'bangumi',
+                status: 'success',
+                score: score,
+                scoreMax: 10,
+                displayValue: score.toFixed(1) + '/10',
+                count: total || null,
+                countText: total ? total + ' 人评分' : null,
+                url: pageUrl,
+                matchedBy: 'title',
+                matchConfidence: 'fuzzy',
+                externalId: String(item.id),
+              },
+            });
+          } catch (e) { errResult(); }
+        }).catch(function () { errResult(); });
+      });
+    },
+  });
+
+  // --- MAL ---
+  sources.push({
+    key: 'mal',
+    label: 'MAL',
+    version: 1,
+    types: ['movie'],
+    requiredConfig: null,
+    channels: [{ channelKey: 'mal', label: 'MAL' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        // Search: https://api.jikan.moe/v4/anime?q={title}&limit=3
+        var keyword = encodeURIComponent(meta.originalTitle || meta.title || '');
+        var apiUrl = 'https://api.jikan.moe/v4/anime?q=' + keyword + '&limit=3';
+
+        function noMatch() {
+          resolve({ mal: { channelKey: 'mal', status: 'no_match' } });
+        }
+        function errResult() {
+          resolve({ mal: { channelKey: 'mal', status: 'error' } });
         }
 
         deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
-          if (resp.status < 200 || resp.status >= 300) {
-            errorAll();
-            return;
-          }
+          if (resp.status < 200 || resp.status >= 300) { errResult(); return; }
           try {
             var data = JSON.parse(resp.responseText);
-            if (!data.success) {
-              resolve({
-                anidb: { channelKey: 'anidb', status: 'no_match' },
-                bangumi: { channelKey: 'bangumi', status: 'no_match' },
-                mal: { channelKey: 'mal', status: 'no_match' },
-              });
+            var list = data.data || [];
+            if (!list.length) { noMatch(); return; }
+            var item = list[0];
+            var score = item.score != null ? parseFloat(item.score) : NaN;
+            var scoredBy = item.scored_by || null;
+            var pageUrl = 'https://myanimelist.net/anime/' + item.mal_id;
+            if (isNaN(score) || score <= 0) {
+              resolve({ mal: { channelKey: 'mal', status: 'no_rating', url: pageUrl } });
               return;
             }
-            var m = data.matched || {};
             resolve({
-              anidb: buildChannel('anidb', m.anidb,
-                m.anidb ? 'https://anidb.net/anime/' + m.anidb.id : undefined),
-              bangumi: buildChannel('bangumi', m.bgm,
-                m.bgm ? 'https://bgm.tv/subject/' + m.bgm.id : undefined),
-              mal: buildChannel('mal', m.mal,
-                m.mal ? 'https://myanimelist.net/anime/' + m.mal.id : undefined),
+              mal: {
+                channelKey: 'mal',
+                status: 'success',
+                score: score,
+                scoreMax: 10,
+                displayValue: score.toFixed(2) + '/10',
+                count: scoredBy,
+                countText: scoredBy ? scoredBy.toLocaleString() + ' votes' : null,
+                url: pageUrl,
+                matchedBy: 'title',
+                matchConfidence: 'fuzzy',
+                externalId: String(item.mal_id),
+              },
             });
-          } catch (e) {
-            errorAll();
-          }
-        }).catch(function () {
-          errorAll();
-        });
+          } catch (e) { errResult(); }
+        }).catch(function () { errResult(); });
       });
     },
   });
