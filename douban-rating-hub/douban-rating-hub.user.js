@@ -456,7 +456,7 @@
     style.id = 'rating-hub-style';
     style.textContent = [
       '.rating-hub-container { margin-top: 8px; font-size: 12px; }',
-      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+      '.rating-hub-row { display: flex; align-items: center; gap: 8px; line-height: 2; flex-wrap: nowrap; }',
       '.rating-hub-label { color: #37a; text-decoration: none; min-width: 110px; border-radius: 3px; padding: 0 3px; transition: color 0.2s, background-color 0.2s; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
@@ -845,12 +845,14 @@
           return;
         }
 
-        // Build slug: lowercase, remove non-alphanumeric except spaces, replace spaces with hyphens
+        // Build slug: & → and, lowercase, strip non-alphanumeric, collapse hyphens
         const slug = titleForSlug
+          .replace(/&/g, 'and')
           .toLowerCase()
           .replace(/[^a-z0-9\s]/g, '')
           .trim()
           .replace(/\s+/g, '-')
+          .replace(/-{2,}/g, '-')
           .replace(/^-+|-+$/g, '');
 
         if (!slug) {
@@ -1799,7 +1801,7 @@
   sources.push({
     key: 'neodb',
     label: 'NeoDB',
-    version: 3,
+    version: 4,
     types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/s/img/icon.png' }],
@@ -1921,7 +1923,9 @@
 
         function tryQuery(queryIndex) {
           if (queryIndex >= queries.length) {
-            const noMatchParams = { q: queries[0] };
+            // no_match 链接用标题搜索（不用 Douban URL，因为 NeoDB 不认识）
+            const noMatchQuery = meta.title || queries[0];
+            const noMatchParams = { q: noMatchQuery };
             if (category !== 'all') noMatchParams.category = category;
             const searchUrl = 'https://neodb.social/search?' + new URLSearchParams(noMatchParams).toString();
             resolve({ neodb: { channelKey: 'neodb', status: 'no_match', url: searchUrl } });
