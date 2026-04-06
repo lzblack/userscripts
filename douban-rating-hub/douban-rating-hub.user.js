@@ -285,7 +285,7 @@
 
   function setCache(doubanId, channelKey, sourceVersion, channelResult) {
     const status = channelResult && channelResult.status;
-    // エラー系・スキップ系はキャッシュしない
+    // error/disabled 状态不缓存
     if (!status || status === 'error' || status === 'disabled') return;
 
     let ttl;
@@ -308,7 +308,7 @@
     const now = Date.now();
     keys.forEach(function (key) {
       if (!key.startsWith('rh:')) return;
-      // 設定キーとクールダウンキーはスキップ
+      // 跳过配置键和冷却键
       if (key === 'rh:config' || key.startsWith('rh:cooldown:')) return;
 
       const entry = deps.storage.get(key);
@@ -360,7 +360,6 @@
 
   function isSourceRelevantForMeta(source, meta) {
     if (!source.types || source.types.indexOf(meta.type) === -1) return false;
-    if (source.key === 'anydb' && (!meta.genres || meta.genres.indexOf('动画') === -1)) return false;
     return true;
   }
 
@@ -626,18 +625,18 @@
     const style = document.createElement('style');
     style.id = 'rating-hub-style';
     style.textContent = [
-      '.rating-hub-container { margin-top: 0; padding: 15px 0 0; border-top: 1px solid #eaeaea; font-size: 12px; color: #333; }',
-      '.rating-hub-row { display: flex; align-items: center; flex-wrap: nowrap; column-gap: 6px; line-height: 1.75; }',
-      '.rating-hub-label { display: inline-flex; align-items: center; min-width: 90px; width: 90px; max-width: 90px; color: #37a; text-decoration: none; border-radius: 3px; padding: 0 2px; transition: color 0.16s ease-out, background-color 0.16s ease-out, box-shadow 0.16s ease-out; font-size: 12px; line-height: 1.4; flex-shrink: 0; }',
-      '.rating-hub-score { display: inline-flex; align-items: center; gap: 1px; color: #2f2f2f; font-variant-numeric: tabular-nums; min-width: 3.75em; letter-spacing: 0.01em; line-height: 1.4; }',
+      '.rating-hub-container { margin-top: 0; padding: 12px 0 0; border-top: 1px solid #eaeaea; font-size: 12px; color: #333; }',
+      '.rating-hub-row { display: grid; grid-template-columns: 101px minmax(40px, auto) minmax(0, 1fr); align-items: center; column-gap: 3px; min-height: 24px; }',
+      '.rating-hub-label { display: inline-flex; align-items: center; min-width: 0; color: #37a; text-decoration: none; border-radius: 3px; padding: 0 2px; transition: color 0.16s ease-out, background-color 0.16s ease-out, box-shadow 0.16s ease-out; font-size: 12px; line-height: 1.2; }',
+      '.rating-hub-score { display: inline-flex; align-items: center; justify-self: start; gap: 0; color: #2f2f2f; font-variant-numeric: tabular-nums; min-width: 3.2em; letter-spacing: 0.01em; line-height: 1; white-space: nowrap; }',
       '.rating-hub-score-main { font-weight: 700; color: #2f2f2f; }',
       '.rating-hub-score-suffix { font-size: 11px; font-weight: 500; color: #8f8f8f; }',
       '.rating-hub-label:hover { color: #fff; background-color: #37a; }',
       '.rating-hub-label.no-link { cursor: default; }',
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
       '.rating-hub-label:focus-visible, .rating-hub-status a:focus-visible, .rh-config-button:focus-visible, .rh-config-input:focus-visible, .rh-config-checkbox:focus-visible, .rh-config-disclosure-summary:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(55, 119, 170, 0.28); background-color: rgba(55, 119, 170, 0.08); }',
-      '.rating-hub-count { color: #777; margin-left: 0; font-variant-numeric: tabular-nums; min-width: 0; white-space: nowrap; }',
-      '.rating-hub-status { color: #666; min-width: 0; white-space: nowrap; }',
+      '.rating-hub-count { color: #777; justify-self: start; margin-left: 0; font-variant-numeric: tabular-nums; min-width: 0; white-space: nowrap; line-height: 1; }',
+      '.rating-hub-status { color: #666; grid-column: 2 / span 2; min-width: 0; white-space: nowrap; line-height: 1.2; }',
       '.rating-hub-status a { color: #37a; text-decoration: none; }',
       '.rating-hub-status a:hover { text-decoration: underline; }',
       '.rating-hub-row[data-status="loading"] .rating-hub-status, .rating-hub-row[data-status="no_match"] .rating-hub-status, .rating-hub-row[data-status="no_rating"] .rating-hub-status { color: #777; }',
@@ -671,7 +670,7 @@
       '.rh-config-button-secondary:hover { border-color: #c9c3b8; background: #faf8f2; }',
       '.rh-config-button-primary { border-color: #4f946e; background: #5c9d78; color: #fff; font-weight: 600; }',
       '.rh-config-button-primary:hover { border-color: #467f61; background: #508a69; }',
-      '@media (max-width: 480px) { .rating-hub-container { font-size: 13px; } .rating-hub-label { min-width: 84px; width: 84px; max-width: 84px; } .rating-hub-score { min-width: 3.4em; } .rh-config-overlay { padding: 12px; } .rh-config-panel { max-height: calc(100vh - 24px); padding: 16px; } .rh-config-source-text { display: block; } .rh-config-source-meta { display: block; margin-top: 2px; white-space: normal; } .rh-config-actions { flex-wrap: wrap; } .rh-config-button { flex: 1 1 140px; } }',
+      '@media (max-width: 480px) { .rating-hub-container { font-size: 13px; padding-top: 10px; } .rating-hub-row { grid-template-columns: 93px minmax(38px, auto) minmax(0, 1fr); column-gap: 3px; min-height: 23px; } .rh-config-overlay { padding: 12px; } .rh-config-panel { max-height: calc(100vh - 24px); padding: 16px; } .rh-config-source-text { display: block; } .rh-config-source-meta { display: block; margin-top: 2px; white-space: normal; } .rh-config-actions { flex-wrap: wrap; } .rh-config-button { flex: 1 1 140px; } }',
       '@media (prefers-reduced-motion: reduce) { .rating-hub-label, .rh-config-source, .rh-config-input, .rh-config-button { transition: none; } }',
     ].join('\n');
     document.head.appendChild(style);
@@ -868,7 +867,7 @@
 
   // --- IMDB ---
   sources.push({
-    key: 'imdb', label: 'IMDB', version: 4,
+    key: 'imdb', label: 'IMDB', version: 1,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -878,7 +877,7 @@
           return;
         }
         const itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
-        // 使用 IMDB 评分 JSON 端点（无 WAF 拦截）
+        // IMDB 评分 JSONP 端点 — 直接返回评分 + 评分人数
         const ratingsUrl = 'https://p.media-imdb.com/static-content/documents/v1/title/' + meta.imdbId + '/ratings%3Fjsonp=imdb.rating.run:imdb.api.title.ratings/data.json';
         deps.request(ratingsUrl).then(function (resp) {
           if (resp.status < 200 || resp.status >= 300) {
@@ -923,7 +922,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 3,
+    key: 'rottentomatoes', label: '烂番茄', version: 1,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -1068,7 +1067,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 5,
+    key: 'metacritic', label: 'Metacritic', version: 1,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1153,7 +1152,7 @@
 
   // --- Letterboxd ---
   sources.push({
-    key: 'letterboxd', label: 'Letterboxd', version: 3,
+    key: 'letterboxd', label: 'Letterboxd', version: 1,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1220,7 +1219,7 @@
           // Letterboxd 只有英文内容，用 originalTitle 去掉季数
           const searchTitle = stripSeason(meta.originalTitle || meta.title || '');
           if (!/[a-zA-Z]/.test(searchTitle)) {
-            resolve(noMatch());
+            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
             return;
           }
           const titleSearchUrl = 'https://letterboxd.com/search/films/' + encodeURIComponent(searchTitle) + '/';
@@ -1303,7 +1302,7 @@
 
   // --- TMDB ---
   sources.push({
-    key: 'tmdb', label: 'TMDB', version: 2,
+    key: 'tmdb', label: 'TMDB', version: 1,
     types: ['movie'],
     requiredConfig: ['tmdbApiKey'],
     channels: [{ channelKey: 'tmdb', label: 'TMDB', icon: 'https://www.themoviedb.org/favicon.ico' }],
@@ -1394,7 +1393,7 @@
   sources.push({
     key: 'bangumi',
     label: 'Bangumi',
-    version: 2,
+    version: 1,
     types: ['movie'],
     requiredConfig: null,
     channels: [{ channelKey: 'bangumi', label: 'Bangumi', icon: 'https://bgm.tv/img/favicon.ico' }],
@@ -1985,7 +1984,7 @@
   sources.push({
     key: 'xiaoyuzhou',
     label: '小宇宙',
-    version: 2,
+    version: 1,
     types: ['podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'xiaoyuzhou', label: '小宇宙', icon: 'https://www.xiaoyuzhoufm.com/favicon.ico' }],
@@ -2046,7 +2045,7 @@
   sources.push({
     key: 'neodb',
     label: 'NeoDB',
-    version: 5,
+    version: 1,
     types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/s/img/icon.png' }],
