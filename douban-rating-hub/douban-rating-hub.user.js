@@ -715,8 +715,14 @@
               }
             } catch (e) { /* skip */ }
           }
-          // No aggregateRating found
-          resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
+          // 没找到 aggregateRating — 区分"真的没评分"和"页面没正常加载"
+          // 正常 IMDB 页面 >100KB；WAF 挑战页 <10KB
+          if (scripts.length === 0 || resp.responseText.length < 50000) {
+            // 页面可能被 WAF 拦截，显示链接而非误导性的"暂无评分"
+            resolve({ imdb: { channelKey: 'imdb', status: 'error', error: 'page incomplete', url: itemUrl } });
+          } else {
+            resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
+          }
         }).catch(function () {
           resolve({ imdb: { channelKey: 'imdb', status: 'no_match', url: itemUrl } });
         });
