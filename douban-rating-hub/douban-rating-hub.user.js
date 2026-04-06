@@ -819,7 +819,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 2,
+    key: 'metacritic', label: 'Metacritic', version: 3,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -840,43 +840,54 @@
           return;
         }
 
-        const apiUrl = 'https://backend.metacritic.com/movies/metacritic/' + slug + '/web';
-        deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
-          if (resp.status === 404) {
+        // 尝试 movies path，404 则尝试 shows path（TV/剧集）
+        function tryMetacritic(paths) {
+          if (paths.length === 0) {
             resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
             return;
           }
-          if (resp.status < 200 || resp.status >= 300) {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-            return;
-          }
-          try {
-            const data = JSON.parse(resp.responseText);
-            const item = data && data.data && data.data.item;
-            let score = item && item.criticScoreSummary && item.criticScoreSummary.score;
-            if (score == null || isNaN(Number(score))) {
-              resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/movie/' + slug + '/' } });
+          const pathType = paths[0];
+          const apiUrl = 'https://backend.metacritic.com/' + pathType + '/metacritic/' + slug + '/web';
+          deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
+            if (resp.status === 404) {
+              tryMetacritic(paths.slice(1));
               return;
             }
-            score = Number(score);
-            resolve({
-              metacritic: {
-                channelKey: 'metacritic',
-                status: 'success',
-                score: score,
-                scoreMax: 100,
-                displayValue: score + '/100',
-                count: null,
-                countText: null,
-                url: 'https://www.metacritic.com/movie/' + slug + '/',
-                matchedBy: 'title_slug',
-                matchConfidence: matchConfidence,
-                externalId: slug,
-              },
-            });
-          } catch (e) {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-          }
+            if (resp.status < 200 || resp.status >= 300) {
+              tryMetacritic(paths.slice(1));
+              return;
+            }
+            try {
+              const data = JSON.parse(resp.responseText);
+              const item = data && data.data && data.data.item;
+              let score = item && item.criticScoreSummary && item.criticScoreSummary.score;
+              if (score == null || isNaN(Number(score))) {
+                resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/' + pathType.replace('shows', 'tv') + '/' + slug + '/' } });
+                return;
+              }
+              score = Number(score);
+              const mcUrlType = pathType === 'shows' ? 'tv' : 'movie';
+              resolve({
+                metacritic: {
+                  channelKey: 'metacritic',
+                  status: 'success',
+                  score: score,
+                  scoreMax: 100,
+                  displayValue: score + '/100',
+                  count: null,
+                  countText: null,
+                  url: 'https://www.metacritic.com/' + mcUrlType + '/' + slug + '/',
+                  matchedBy: 'title_slug',
+                  matchConfidence: matchConfidence,
+                  externalId: slug,
+                },
+              });
+            } catch (e) {
+              tryMetacritic(paths.slice(1));
+            }
+          }).catch(function () { tryMetacritic(paths.slice(1)); });
+        }
+        tryMetacritic(['movies', 'shows']);
         }).catch(function () {
           resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
         });
@@ -1680,7 +1691,7 @@
   sources.push({
     key: 'neodb',
     label: 'NeoDB',
-    version: 2,
+    version: 3,
     types: ['book', 'movie', 'music', 'game', 'drama', 'podcast'],
     requiredConfig: null,
     channels: [{ channelKey: 'neodb', label: 'NeoDB', icon: 'https://neodb.social/s/img/icon.png' }],
