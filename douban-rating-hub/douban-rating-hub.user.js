@@ -700,7 +700,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 1,
+    key: 'rottentomatoes', label: '烂番茄', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -763,19 +763,38 @@
           return;
         }
 
-        // Step 1: Search RT to find movie path
+        // Step 1: Search RT to find movie/tv path — validate title match
         deps.request(searchUrl).then(function (searchResp) {
           if (searchResp.status < 200 || searchResp.status >= 300) {
             noMatchBoth();
             return;
           }
           const searchDoc = deps.parseHTML(searchResp.responseText);
-          const linkEl = searchDoc.querySelector('search-page-media-row a[data-qa="info-name"]');
-          if (!linkEl) {
+          const allResults = searchDoc.querySelectorAll('search-page-media-row');
+          if (!allResults || allResults.length === 0) {
             noMatchBoth();
             return;
           }
-          const moviePath = linkEl.getAttribute('href') || '';
+          // 标题匹配：找最接近的结果，而不是盲目取第一个
+          const normalize = function (s) { return (s || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ''); };
+          const queryNorm = normalize(titleForSearch);
+          let bestLink = null;
+          for (let i = 0; i < allResults.length; i++) {
+            const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
+            if (!nameEl) continue;
+            const resultTitle = normalize(nameEl.textContent);
+            // 精确包含或被包含
+            if (resultTitle.includes(queryNorm) || queryNorm.includes(resultTitle)) {
+              bestLink = nameEl;
+              break;
+            }
+          }
+          if (!bestLink) {
+            // 没有匹配的结果
+            noMatchBoth();
+            return;
+          }
+          const moviePath = bestLink.getAttribute('href') || '';
           if (!moviePath) {
             noMatchBoth();
             return;
@@ -830,7 +849,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 3,
+    key: 'metacritic', label: 'Metacritic', version: 4,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1784,9 +1803,9 @@
             status: 'success',
             score: rank,
             scoreMax: null,
-            displayValue: '#' + rank,
+            displayValue: '榜#' + rank,
             count: avgPlay,
-            countText: avgPlay >= 10000 ? (avgPlay / 10000).toFixed(1) + '万播放' : avgPlay.toLocaleString() + '播放',
+            countText: avgPlay >= 10000 ? (avgPlay / 10000).toFixed(0) + '万播' : avgPlay.toLocaleString(),
             url: xyzUrl || 'https://xyzrank.com/',
             matchedBy: 'title',
             matchConfidence: 'fuzzy',
