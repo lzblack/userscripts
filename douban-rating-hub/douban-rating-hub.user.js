@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
-// @version      1.0.3
+// @homepageURL  https://github.com/lzblack/userscripts
+// @version      1.0.4
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -1161,7 +1162,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 3,
+    key: 'metacritic', label: 'Metacritic', version: 4,
     types: ['movie', 'game'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1170,7 +1171,6 @@
         const titleForSlug = stripSeason(titleRaw);
         const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
         const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
-        deps.log('[MC]', 'originalTitle:', meta.originalTitle, '| titleRaw:', titleRaw, '| searchUrl:', searchUrl);
 
         // If title contains no ASCII letters it's CJK-only — Metacritic has no match
         if (!titleForSlug || !/[a-zA-Z]/.test(titleForSlug)) {
