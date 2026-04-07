@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         豆瓣条目 NeoDB 评分增强
 // @namespace    https://github.com/lzblack
+// @homepageURL  https://github.com/lzblack/userscripts
 // @version      1.0.5
 // @author       lzblack
 // @description  在豆瓣条目页（书籍、电影、音乐、游戏）上添加 NeoDB.social 的评分展示（含条目链接）

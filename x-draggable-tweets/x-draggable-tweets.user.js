@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         X.com Draggable Tweets
 // @namespace    https://github.com/lzblack
+// @homepageURL  https://github.com/lzblack/userscripts
 // @version      1.0.1
 // @author       lzblack
 // @description  Make entire tweet cards draggable as real links (works with Glitter Drag)
