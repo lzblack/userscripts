@@ -2,7 +2,7 @@
 // @name         豆瓣书名号转搜索链接
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.2.2
+// @version      1.2.3
 // @author       lzblack
 // @description  将豆瓣网站上的书名号《》中的内容转换为可点击的搜索链接，就像豆瓣 App 一样！点击书名号内的文字即可快速搜索，无需手动复制粘贴。
 // @license      MIT
@@ -37,11 +37,7 @@
             return true;
         }
 
-        if (processedElements.has(element)) {
-            return true;
-        }
-
-        return false;
+        return processedElements.has(element);
     }
 
     function processTextNode(textNode) {

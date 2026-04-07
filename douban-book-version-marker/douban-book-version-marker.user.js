@@ -2,7 +2,7 @@
 // @name         豆瓣读书版本标记提示
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.0.1
+// @version      1.0.2
 // @author       lzblack
 // @description  在豆瓣读书条目页提示你标记过同一作品的其他版本
 // @match        https://book.douban.com/subject/*
@@ -160,7 +160,7 @@
       const line = document.createElement('div');
 
       const label = STATUS_LABELS[v.status] || v.status;
-      line.appendChild(document.createTextNode(`${label}另一版本：`));
+      line.appendChild(document.createTextNode(`${label} 另一版本：`));
 
       const link = document.createElement('a');
       link.href = v.url;
