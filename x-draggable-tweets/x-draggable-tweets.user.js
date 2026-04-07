@@ -2,7 +2,7 @@
 // @name         X.com Draggable Tweets
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.0.1
+// @version      1.0.2
 // @author       lzblack
 // @description  Make entire tweet cards draggable as real links (works with Glitter Drag)
 // @match        https://x.com/*
@@ -26,7 +26,7 @@
 
   function getStatusKey(url) {
     const m = url.match(/\/([^/]+)\/status\/(\d+)/);
-    return m ? m[1] + "/status/" + m[2] : null;
+    return m ? `${m[1]}/status/${m[2]}` : null;
   }
 
   // Primary: extract URL from <a href="/user/status/id"> inside the element
