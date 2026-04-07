@@ -14,6 +14,7 @@ Monorepo of standalone browser userscripts (Tampermonkey/Violentmonkey). Each sc
 | `douban-title-mark-search/` | Douban (all pages) | Converts Chinese book title marks (`《》`) into clickable Douban search links. Uses MutationObserver for dynamically loaded content. |
 | `douban-book-version-marker/` | Douban (book pages) | Shows tips when the user has marked a different edition of the same work (想读/在读/已读). Uses `/j/subject/{id}/interest` AJAX endpoint. |
 | `douban-rating-hub/` | Douban (book/movie/music/game pages) | Aggregates ratings from IMDB, Rotten Tomatoes, Metacritic, Letterboxd, TMDB, AniDB, Bangumi, MAL, Goodreads, Amazon, WeChat Reading, and NeoDB. Uses Registry/Strategy pattern with channel-based caching. |
+| `douban-feed-mark/` | Douban (homepage feed) | Shows user's own mark status (想读/在读/已读 etc.) and rating on book/movie/music/game items in the feed. Uses `GM_xmlhttpRequest` to query per-category subdomain interest API with caching. |
 | `x-draggable-tweets/` | X.com / Twitter | Makes tweet cards draggable as real `<a>` links for drag extensions (e.g., Glitter Drag). Reads tweet URLs from DOM and React fiber internals. |
 
 ## Development Workflow
