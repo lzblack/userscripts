@@ -18,6 +18,7 @@
 // @connect      movie.douban.com
 // @connect      music.douban.com
 // @connect      game.douban.com
+// @supportURL   https://github.com/lzblack/userscripts/issues
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-feed-mark/douban-feed-mark.user.js
 // @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/douban-feed-mark/douban-feed-mark.user.js
