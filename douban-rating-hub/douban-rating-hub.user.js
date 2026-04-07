@@ -1170,6 +1170,7 @@
         const titleForSlug = stripSeason(titleRaw);
         const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
         const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+        deps.log('[MC]', 'originalTitle:', meta.originalTitle, '| titleRaw:', titleRaw, '| searchUrl:', searchUrl);
 
         // If title contains no ASCII letters it's CJK-only — Metacritic has no match
         if (!titleForSlug || !/[a-zA-Z]/.test(titleForSlug)) {
