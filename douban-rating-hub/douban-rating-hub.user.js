@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
-// @version      1.0.1
-// @description  在豆瓣条目页聚合显示 IMDB、烂番茄、Metacritic、Letterboxd、Goodreads、Amazon、微信读书、NeoDB 等多平台评分
+// @version      1.0.2
+// @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
 // @match        https://music.douban.com/subject/*
