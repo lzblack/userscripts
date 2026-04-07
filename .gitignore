@@ -1,6 +1,8 @@
 docs/superpowers/
 tasks/
 .agents/
+.claude/
+.superpowers/
 .playwright-mcp/
 .impeccable.md
 skills-lock.json
