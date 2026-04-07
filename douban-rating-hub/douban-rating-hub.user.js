@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
-// @version      1.0.2
+// @version      1.0.3
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -12,6 +12,7 @@
 // @match        https://www.douban.com/podcast/*
 // @connect      imdb.com
 // @connect      p.media-imdb.com
+// @connect      api.graphql.imdb.com
 // @connect      rottentomatoes.com
 // @connect      backend.metacritic.com
 // @connect      letterboxd.com
@@ -54,6 +55,7 @@
           method: opts.method || 'GET',
           url,
           headers: opts.headers || {},
+          data: opts.data || undefined,
           onload(resp) { resolve(resp); },
           onerror(err) { reject(new Error('Request failed: ' + url)); },
         });
@@ -149,16 +151,31 @@
 
     // 英文标题提取：多层 fallback
     let originalTitle = null;
-    // 1. #info 原作名
+    // 1. #info 原作名（仅含拉丁字母时采用，否则 fallback 到又名提取英文）
     const originalTitleMatch = infoText.match(/原作名:\s*(.+)/);
-    if (originalTitleMatch) {
+    if (originalTitleMatch && /[a-zA-Z]/.test(originalTitleMatch[1])) {
       originalTitle = originalTitleMatch[1].trim();
     }
-    // 2. #info 又名（取第一个纯 ASCII 项）
+    // 2. 又名/别名（取第一个纯 ASCII 项）
+    //    电影/书籍：#info 内 "又名: A / B / C"
+    //    游戏：<dt>别名:</dt><dd>A / B / C</dd>（无 #info）
     if (!originalTitle) {
+      let aliasText = null;
       const alsoKnownMatch = infoText.match(/又名:\s*(.+)/);
       if (alsoKnownMatch) {
-        const candidates = alsoKnownMatch[1].split(/\s*\/\s*/);
+        aliasText = alsoKnownMatch[1];
+      } else {
+        const dts = document.querySelectorAll('dt');
+        for (let i = 0; i < dts.length; i++) {
+          if (dts[i].textContent.trim() === '别名:') {
+            const dd = dts[i].nextElementSibling;
+            if (dd) aliasText = dd.textContent.trim();
+            break;
+          }
+        }
+      }
+      if (aliasText) {
+        const candidates = aliasText.split(/\s*\/\s*/);
         const englishName = candidates.find((c) => /^[\x20-\x7E]+$/.test(c.trim()));
         if (englishName) originalTitle = englishName.trim();
       }
@@ -917,7 +934,7 @@
 
   // --- IMDB ---
   sources.push({
-    key: 'imdb', label: 'IMDB', version: 1,
+    key: 'imdb', label: 'IMDB', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'imdb', label: 'IMDB', icon: 'https://www.imdb.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -927,45 +944,59 @@
           return;
         }
         const itemUrl = 'https://www.imdb.com/title/' + meta.imdbId + '/';
-        // IMDB 评分 JSONP 端点 — 直接返回评分 + 评分人数
-        const ratingsUrl = 'https://p.media-imdb.com/static-content/documents/v1/title/' + meta.imdbId + '/ratings%3Fjsonp=imdb.rating.run:imdb.api.title.ratings/data.json';
-        deps.request(ratingsUrl).then(function (resp) {
-          if (resp.status < 200 || resp.status >= 300) {
-            resolve({ imdb: { channelKey: 'imdb', status: 'error', url: itemUrl } });
-            return;
-          }
-          try {
-            // JSONP 格式：imdb.rating.run({...})，去掉包装
-            const jsonText = resp.responseText.replace(/^[^(]+\(/, '').replace(/\)\s*$/, '');
-            const data = JSON.parse(jsonText);
-            const res = data.resource || data;
-            const score = parseFloat(res.rating);
-            const count = parseInt(res.ratingCount, 10) || 0;
-            if (isNaN(score) || score === 0) {
-              resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } });
-              return;
-            }
-            resolve({
-              imdb: {
-                channelKey: 'imdb',
-                status: 'success',
-                score: score,
-                scoreMax: 10,
-                displayValue: score.toFixed(1) + '/10',
-                count: count,
-                countText: count.toLocaleString(),
-                url: itemUrl,
-                matchedBy: 'imdb_id',
-                matchConfidence: 'exact',
-                externalId: meta.imdbId,
-              },
-            });
-          } catch (e) {
-            resolve({ imdb: { channelKey: 'imdb', status: 'error', error: e.message, url: itemUrl } });
-          }
-        }).catch(function () {
-          resolve({ imdb: { channelKey: 'imdb', status: 'error', url: itemUrl } });
+
+        function buildSuccess(score, count) {
+          resolve({
+            imdb: {
+              channelKey: 'imdb', status: 'success',
+              score: score, scoreMax: 10,
+              displayValue: score.toFixed(1) + '/10',
+              count: count, countText: count.toLocaleString(),
+              url: itemUrl, matchedBy: 'imdb_id', matchConfidence: 'exact',
+              externalId: meta.imdbId,
+            },
+          });
+        }
+        function errorResult() { resolve({ imdb: { channelKey: 'imdb', status: 'error', url: itemUrl } }); }
+        function noRating() { resolve({ imdb: { channelKey: 'imdb', status: 'no_rating', url: itemUrl } }); }
+
+        // 兜底：旧版 JSONP 端点
+        function tryJsonpFallback() {
+          const ratingsUrl = 'https://p.media-imdb.com/static-content/documents/v1/title/' + meta.imdbId + '/ratings%3Fjsonp=imdb.rating.run:imdb.api.title.ratings/data.json';
+          deps.request(ratingsUrl).then(function (resp) {
+            if (resp.status < 200 || resp.status >= 300) { errorResult(); return; }
+            try {
+              const jsonText = resp.responseText.replace(/^[^(]+\(/, '').replace(/\)\s*$/, '');
+              const data = JSON.parse(jsonText);
+              const res = data.resource || data;
+              const score = parseFloat(res.rating);
+              const count = parseInt(res.ratingCount, 10) || 0;
+              if (isNaN(score) || score === 0) { noRating(); return; }
+              buildSuccess(score, count);
+            } catch (e) { errorResult(); }
+          }).catch(function () { errorResult(); });
+        }
+
+        // 主路径：GraphQL API
+        const body = JSON.stringify({
+          query: 'query($id:ID!){title(id:$id){ratingsSummary{aggregateRating voteCount}}}',
+          variables: { id: meta.imdbId },
         });
+        deps.request('https://api.graphql.imdb.com/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          data: body,
+        }).then(function (resp) {
+          if (resp.status < 200 || resp.status >= 300) { tryJsonpFallback(); return; }
+          try {
+            const json = JSON.parse(resp.responseText);
+            const summary = json.data && json.data.title && json.data.title.ratingsSummary;
+            const score = summary && parseFloat(summary.aggregateRating);
+            const count = (summary && summary.voteCount) || 0;
+            if (score == null || isNaN(score) || score === 0) { noRating(); return; }
+            buildSuccess(score, count);
+          } catch (e) { tryJsonpFallback(); }
+        }).catch(function () { tryJsonpFallback(); });
       });
     },
   });
@@ -1130,7 +1161,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 2,
+    key: 'metacritic', label: 'Metacritic', version: 3,
     types: ['movie', 'game'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1161,10 +1192,61 @@
           return;
         }
 
-        // 尝试 movies path，404 则尝试 shows path（TV/剧集）
+        // Finder 搜索兜底 — slug 匹配全部失败后用标题搜索
+        function tryFinderSearch() {
+          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+          const queryNorm = normalize(titleForSlug);
+          // mcoTypeId: 2=movies, 1=TV shows, 13=games
+          function tryFinderForType(typeId, onFail) {
+            const finderUrl = 'https://backend.metacritic.com/finder/metacritic/web?query=' +
+              encodeURIComponent(titleForSlug) + '&mcoTypeId=' + typeId + '&limit=20';
+            deps.request(finderUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
+              if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
+              try {
+                const data = JSON.parse(resp.responseText);
+                const items = data && data.data && data.data.items;
+                if (!items || items.length === 0) { onFail(); return; }
+                let matched = null;
+                for (let i = 0; i < items.length; i++) {
+                  if (normalize(items[i].title) === queryNorm) { matched = items[i]; break; }
+                }
+                if (!matched) { onFail(); return; }
+                const score = matched.criticScoreSummary && matched.criticScoreSummary.score;
+                const finderSlug = matched.slug || '';
+                const mcUrlType = typeId === 1 ? 'tv' : (typeId === 13 ? 'game' : 'movie');
+                if (score == null || isNaN(Number(score))) {
+                  resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/' + mcUrlType + '/' + finderSlug + '/' } });
+                  return;
+                }
+                const reviewCount = (matched.criticScoreSummary && matched.criticScoreSummary.reviewCount) || null;
+                resolve({
+                  metacritic: {
+                    channelKey: 'metacritic', status: 'success',
+                    score: Number(score), scoreMax: 100,
+                    displayValue: Number(score) + '/100',
+                    count: reviewCount, countText: reviewCount ? reviewCount.toLocaleString() : null,
+                    url: 'https://www.metacritic.com/' + mcUrlType + '/' + finderSlug + '/',
+                    matchedBy: 'finder_search', matchConfidence: 'high',
+                    externalId: finderSlug,
+                  },
+                });
+              } catch (e) { onFail(); }
+            }).catch(function () { onFail(); });
+          }
+          function noMatchFinal() {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+          }
+          if (meta.type === 'game') {
+            tryFinderForType(13, noMatchFinal);
+          } else {
+            tryFinderForType(2, function () { tryFinderForType(1, noMatchFinal); });
+          }
+        }
+
+        // 尝试 movies path，404 则尝试 shows path（TV/剧集），最后 finder 搜索兜底
         function tryMetacritic(paths) {
           if (paths.length === 0) {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+            tryFinderSearch();
             return;
           }
           const pathType = paths[0];
