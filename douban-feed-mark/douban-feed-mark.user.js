@@ -2,7 +2,7 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.0.0
+// @version      1.1.0
 // @author       lzblack
 // @description  在豆瓣首页广播流中，显示你对好友分享的书影音游戏的标记状态和评分
 // @match        https://www.douban.com/
@@ -14,6 +14,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_listValues
 // @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
 // @connect      book.douban.com
 // @connect      movie.douban.com
 // @connect      music.douban.com
@@ -29,16 +30,16 @@
 
   // ============ 常量 ============
 
-  const CACHE_PREFIX = 'dfm:v1:';
+  const CACHE_PREFIX = 'dfm:v2:';
   const CACHE_TTL_MARKED = 7 * 24 * 60 * 60 * 1000;
   const CACHE_TTL_UNMARKED = 24 * 60 * 60 * 1000;
   const MAX_CONCURRENT = 3;
 
   const STATUS_LABELS = {
-    book:  { wish: '想读', do: '在读', collect: '已读' },
-    movie: { wish: '想看', do: '在看', collect: '已看' },
-    music: { wish: '想听', do: '在听', collect: '已听' },
-    game:  { wish: '想玩', do: '在玩', collect: '已玩' },
+    book:  { wish: '已想读', do: '已在读', collect: '已读过' },
+    movie: { wish: '已想看', do: '已在看', collect: '已看过' },
+    music: { wish: '已想听', do: '已在听', collect: '已听过' },
+    game:  { wish: '已想玩', do: '已在玩', collect: '已玩过' },
   };
 
   const CATEGORY_HOSTS = {
@@ -47,6 +48,24 @@
     music: 'music.douban.com',
     game: 'game.douban.com',
   };
+
+  const DISPLAY_MODE_KEY = 'dfm:displayMode';
+
+  function getDisplayMode() {
+    return GM_getValue(DISPLAY_MODE_KEY, 'stamp');
+  }
+
+  function toggleDisplayMode() {
+    const current = getDisplayMode();
+    const next = current === 'stamp' ? 'tag' : 'stamp';
+    GM_setValue(DISPLAY_MODE_KEY, next);
+    location.reload();
+  }
+
+  GM_registerMenuCommand(
+    '切换显示模式（印章 / 标签）',
+    toggleDisplayMode
+  );
 
   // ============ 工具函数 ============
 
@@ -124,12 +143,18 @@
               return;
             }
             const data = JSON.parse(resp.responseText);
-            const status = data.interest_status || null;
+            let status = data.interest_status || null;
             let rating = 0;
-            if (status && data.html) {
+            if (data.html) {
               const doc = new DOMParser().parseFromString(data.html, 'text/html');
-              const ratingEl = doc.querySelector('#n_rating');
-              rating = ratingEl ? parseInt(ratingEl.value, 10) || 0 : 0;
+              if (!status) {
+                const checked = doc.querySelector('input[name="interest"]:checked');
+                status = checked ? checked.value || null : null;
+              }
+              if (status) {
+                const ratingEl = doc.querySelector('#n_rating');
+                rating = ratingEl ? parseInt(ratingEl.value, 10) || 0 : 0;
+              }
             }
             resolve({ status, rating });
           } catch (e) {
@@ -174,6 +199,38 @@
     const style = document.createElement('style');
     style.id = 'dfm-styles';
     style.textContent = `
+      .dfm-wrapper {
+        position: absolute;
+        right: 30px;
+        bottom: 8px;
+      }
+      .dfm-stamp {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 54px;
+        height: 54px;
+        border: 2px solid rgba(195, 128, 53, 0.45);
+        border-radius: 50%;
+        box-shadow: 0 0 0 2.5px rgba(195, 128, 53, 0.2);
+        color: rgba(195, 128, 53, 0.55);
+        transform: rotate(-18deg);
+        pointer-events: none;
+        line-height: 1.2;
+      }
+      .dfm-stamp-text {
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .dfm-stamp-stars {
+        font-size: 8px;
+        letter-spacing: -0.5px;
+      }
+      .dfm-stamp-check {
+        font-size: 14px;
+        font-weight: bold;
+      }
       .dfm-tag {
         display: inline-block;
         background: #f0fff0;
@@ -197,12 +254,49 @@
   function renderTag(link, status, rating, category) {
     const labels = STATUS_LABELS[category];
     if (!labels || !status || !labels[status]) return;
-    const text = labels[status] + renderStars(rating);
-    const tag = document.createElement('span');
-    tag.className = 'dfm-tag';
-    tag.textContent = text;
-    // 插入到标题行父元素的末尾（评分之后）
-    link.parentElement.appendChild(tag);
+    const mode = getDisplayMode();
+
+    if (mode === 'tag') {
+      // 标签模式：inline tag 在标题行
+      if (link.parentElement.querySelector('.dfm-tag')) return;
+      const tag = document.createElement('span');
+      tag.className = 'dfm-tag';
+      tag.textContent = labels[status] + renderStars(rating);
+      link.parentElement.appendChild(tag);
+      return;
+    }
+
+    // 印章模式：绝对定位在内容区
+    const card = link.closest('.block-subject');
+    const content = card ? card.querySelector('.content') : null;
+    if (!content) return;
+    if (content.querySelector('.dfm-wrapper')) return;
+
+    content.style.position = 'relative';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'dfm-wrapper';
+
+    const stamp = document.createElement('span');
+    stamp.className = 'dfm-stamp';
+    const textEl = document.createElement('span');
+    textEl.className = 'dfm-stamp-text';
+    textEl.textContent = labels[status];
+    stamp.appendChild(textEl);
+    if (status === 'collect' && rating) {
+      const starsEl = document.createElement('span');
+      starsEl.className = 'dfm-stamp-stars';
+      starsEl.textContent = '★'.repeat(rating);
+      stamp.appendChild(starsEl);
+    } else {
+      const checkEl = document.createElement('span');
+      checkEl.className = 'dfm-stamp-check';
+      checkEl.textContent = '✓';
+      stamp.appendChild(checkEl);
+    }
+    wrapper.appendChild(stamp);
+
+    content.appendChild(wrapper);
   }
 
   // ============ 主逻辑 ============
