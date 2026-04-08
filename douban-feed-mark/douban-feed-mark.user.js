@@ -2,7 +2,7 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.0
+// @version      1.1.1
 // @author       lzblack
 // @description  在豆瓣首页广播流中，显示你对好友分享的书影音游戏的标记状态和评分
 // @match        https://www.douban.com/
