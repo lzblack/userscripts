@@ -228,8 +228,13 @@
         letter-spacing: -0.5px;
       }
       .dfm-stamp-check {
-        font-size: 14px;
-        font-weight: bold;
+        line-height: 0;
+        height: 10px;
+        overflow: visible;
+      }
+      .dfm-stamp-check svg {
+        width: 18px;
+        height: 15px;
       }
       .dfm-tag {
         display: inline-block;
@@ -291,7 +296,7 @@
     } else {
       const checkEl = document.createElement('span');
       checkEl.className = 'dfm-stamp-check';
-      checkEl.textContent = '✓';
+      checkEl.innerHTML = '<svg viewBox="0 0 24 22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10 Q6 16 9 19 Q15.5 12 22 5"/></svg>';
       stamp.appendChild(checkEl);
     }
     wrapper.appendChild(stamp);
