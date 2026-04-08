@@ -7,3 +7,4 @@ tasks/
 .impeccable.md
 skills-lock.json
 *.png
+!**/screenshots/*.png
