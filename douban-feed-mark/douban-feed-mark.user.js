@@ -201,8 +201,8 @@
     style.textContent = `
       .dfm-wrapper {
         position: absolute;
-        right: 30px;
-        bottom: 8px;
+        right: 3px;
+        bottom: 3px;
       }
       .dfm-stamp {
         display: inline-flex;
