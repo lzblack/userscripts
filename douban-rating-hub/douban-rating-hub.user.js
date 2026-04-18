@@ -769,6 +769,15 @@
       '.rh-config-button-primary:hover { border-color: #467f61; background: #508a69; }',
       '@media (max-width: 480px) { .rating-hub-container { font-size: 13px; padding-top: 10px; } .rating-hub-row { grid-template-columns: 93px minmax(38px, auto) minmax(0, 1fr); column-gap: 3px; min-height: 23px; } .rh-config-overlay { padding: 12px; } .rh-config-panel { max-height: calc(100vh - 24px); padding: 16px; } .rh-config-source-text { display: block; } .rh-config-source-meta { display: block; margin-top: 2px; white-space: normal; } .rh-config-actions { flex-wrap: wrap; } .rh-config-button { flex: 1 1 140px; } }',
       '@media (prefers-reduced-motion: reduce) { .rating-hub-label, .rh-config-source, .rh-config-input, .rh-config-button { transition: none; } }',
+      // ========== 榜单胶囊（v1.1.0 新增） ==========
+      '.rating-hub-rank-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 5px 0; }',
+      '.rating-hub-rank-divider { color: #d0ccc2; padding: 0 4px; font-weight: 300; user-select: none; }',
+      '.rating-hub-mark { display: inline-flex; align-items: center; font: 12px Helvetica, Arial, sans-serif; height: 18px; line-height: 18px; border-radius: 3px; overflow: hidden; background: linear-gradient(180deg, #faf0dc 0%, #f0d2a0 50%, #e8b870 100%); border: 1px solid #d4b078; color: #835000; }',
+      '.rating-hub-mark-no { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 100%; font-weight: 600; color: #8d5500; background: linear-gradient(180deg, #e8c878 0%, #d4a858 100%); border-right: 1px solid #c89848; }',
+      '.rating-hub-mark-no > span { height: 18px; line-height: 18px; }',
+      '.rating-hub-mark-link { display: inline-block; padding: 0 7px 0 5px; }',
+      '.rating-hub-mark-link a { color: #835000; text-decoration: none; }',
+      '.rating-hub-mark-link a:hover { text-decoration: underline; }',
     ].join('\n');
     document.head.appendChild(style);
   }
