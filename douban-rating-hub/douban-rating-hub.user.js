@@ -2641,6 +2641,105 @@
   }
 
   // ============================================================
+  // RankingData — 榜单数据获取与缓存（v1.1.0 新增）
+  // ============================================================
+
+  const RankingData = {
+    _BASE: 'https://rank.douban.zhili.dev',
+    _CACHE_KEY_PREFIX: 'rating_hub_rankings_cache_v1:',
+    _MANIFEST_CACHE_KEY: 'rating_hub_rankings_manifest_v1',
+    _TTL_MS: 24 * 60 * 60 * 1000,     // 24 小时
+    _inflight: {},                     // 按 category 缓存 Promise（dedup）
+
+    /**
+     * @param {string} category 'movie' | 'book' | ...
+     * @returns {Promise<object|null>} 完整 JSON 或 null（静默降级）
+     */
+    async getForCategory(category) {
+      if (!category) return null;
+      if (this._inflight[category]) return this._inflight[category];
+
+      const promise = this._loadAndCache(category);
+      this._inflight[category] = promise;
+      try {
+        return await promise;
+      } finally {
+        delete this._inflight[category];
+      }
+    },
+
+    forceRefresh() {
+      const keys = deps.storage.listKeys();
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.indexOf(this._CACHE_KEY_PREFIX) === 0 || k === this._MANIFEST_CACHE_KEY) {
+          deps.storage.remove(k);
+        }
+      }
+    },
+
+    async _loadAndCache(category) {
+      try {
+        // 1. 读 category 数据 cache
+        const cacheKey = this._CACHE_KEY_PREFIX + category;
+        const cached = deps.storage.get(cacheKey);
+        if (cached && cached.ts && (Date.now() - cached.ts) < this._TTL_MS && cached.data) {
+          return cached.data;
+        }
+
+        // 2. 读 manifest
+        const manifest = await this._fetchJson(this._BASE + '/manifest.json');
+        if (!manifest || manifest.schemaVersion !== 1) {
+          deps.log('RankingData: manifest schemaVersion mismatch or missing');
+          return null;
+        }
+        if (!Array.isArray(manifest.categories) || manifest.categories.indexOf(category) === -1) {
+          deps.log('RankingData: category not supported by upstream —', category);
+          return null;
+        }
+
+        // 3. 读 category JSON
+        const url = (manifest.urls && manifest.urls[category]) || (this._BASE + '/' + category + '.json');
+        const data = await this._fetchJson(url);
+        if (!data || data.schemaVersion !== 1) {
+          deps.log('RankingData: data schemaVersion mismatch —', category);
+          return null;
+        }
+
+        // 4. 写 cache
+        deps.storage.set(cacheKey, { ts: Date.now(), data });
+        return data;
+      } catch (e) {
+        deps.log('RankingData error for category', category, e);
+        return null;
+      }
+    },
+
+    _fetchJson(url) {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          timeout: 15000,
+          onload(resp) {
+            if (resp.status < 200 || resp.status >= 300) {
+              reject(new Error('HTTP ' + resp.status + ' for ' + url));
+              return;
+            }
+            try {
+              resolve(JSON.parse(resp.responseText));
+            } catch (e) {
+              reject(new Error('Invalid JSON from ' + url));
+            }
+          },
+          onerror() { reject(new Error('Network error for ' + url)); },
+          ontimeout() { reject(new Error('Timeout for ' + url)); },
+        });
+      });
+    },
+  };
+
+  // ============================================================
   // init — 主入口
   // ============================================================
 
