@@ -2739,6 +2739,106 @@
     },
   };
 
+  /**
+   * 从 category data 里解析当前 subject 应展示的榜单条目列表。
+   * @param {object} data
+   * @param {string} category
+   * @param {string} subjectId
+   * @param {object} prefs
+   * @returns {Array}
+   */
+  function resolveMarksForSubject(data, category, subjectId, prefs) {
+    if (!data || !data.categories) return [];
+    const categoryData = data.categories[category];
+    if (!categoryData) return [];
+    const records = (categoryData.items && categoryData.items[subjectId]) || [];
+    const result = [];
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      if (!r || !r.source) continue;
+      if (prefs.enabledSources[r.source] === false) continue;   // 未列出 = 默认启用
+      const sourceMeta = categoryData.sources && categoryData.sources[r.source];
+      if (!sourceMeta) continue;
+      result.push({
+        sourceId: r.source,
+        title: sourceMeta.titleZh || sourceMeta.title,
+        url: sourceMeta.url,
+        rank: r.rank == null ? null : r.rank,
+        spineNumber: r.spineNumber || null,
+        priority: typeof sourceMeta.priority === 'number' ? sourceMeta.priority : 99,
+      });
+    }
+    result.sort((a, b) => a.priority - b.priority);
+    return result;
+  }
+
+  // ============================================================
+  // RankingRenderer — 把榜单数据渲染为 title 上方的胶囊（v1.1.0 新增）
+  // ============================================================
+
+  const RankingRenderer = {
+    mount(marks) {
+      this._removeExisting();
+      if (!marks || marks.length === 0) return;
+      const anchor = this._findAnchor();
+      if (!anchor) return;
+      const container = this._buildContainer(marks);
+      anchor.el.insertAdjacentElement(anchor.placement, container);
+    },
+
+    _findAnchor() {
+      const native = document.querySelector('.top250, .rank-label.rank-label-other');
+      if (native) return { el: native, placement: 'afterend' };
+      const h1 = document.querySelector('#content > h1');
+      if (h1) return { el: h1, placement: 'beforebegin' };
+      return null;
+    },
+
+    _buildContainer(marks) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'rating-hub-rank-marks';
+      wrapper.setAttribute('data-rating-hub-ranks', '1');
+
+      const hasNativeRank = !!document.querySelector('.top250, .rank-label.rank-label-other');
+      if (hasNativeRank) {
+        const divider = document.createElement('span');
+        divider.className = 'rating-hub-rank-divider';
+        divider.textContent = '|';
+        wrapper.appendChild(divider);
+      }
+
+      for (let i = 0; i < marks.length; i++) {
+        wrapper.appendChild(this._buildMark(marks[i]));
+      }
+      return wrapper;
+    },
+
+    _buildMark(mark) {
+      const el = document.createElement('div');
+      el.className = 'rating-hub-mark';
+      el.setAttribute('data-source', mark.sourceId);
+      el.innerHTML = ''
+        + '<span class="rating-hub-mark-no"><span>' + escapeHtml(this._formatRank(mark)) + '</span></span>'
+        + '<span class="rating-hub-mark-link">'
+        +   '<a href="' + escapeHtml(mark.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(mark.title) + '</a>'
+        + '</span>';
+      return el;
+    },
+
+    _formatRank(mark) {
+      if (mark.rank != null) return 'No.' + mark.rank;
+      if (mark.spineNumber) return '#' + mark.spineNumber;
+      return '—';
+    },
+
+    _removeExisting() {
+      const existing = document.querySelectorAll('[data-rating-hub-ranks="1"]');
+      for (let i = 0; i < existing.length; i++) {
+        existing[i].parentNode.removeChild(existing[i]);
+      }
+    },
+  };
+
   // ============================================================
   // init — 主入口
   // ============================================================
