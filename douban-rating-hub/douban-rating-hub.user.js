@@ -873,14 +873,22 @@
       '@media (max-width: 480px) { .rating-hub-container { font-size: 13px; padding-top: 10px; } .rating-hub-row { grid-template-columns: 93px minmax(38px, auto) minmax(0, 1fr); column-gap: 3px; min-height: 23px; } .rh-config-overlay { padding: 12px; } .rh-config-panel { max-height: calc(100vh - 24px); padding: 16px; } .rh-config-source-text { display: block; } .rh-config-source-meta { display: block; margin-top: 2px; white-space: normal; } .rh-config-actions { flex-wrap: wrap; } .rh-config-button { flex: 1 1 140px; } }',
       '@media (prefers-reduced-motion: reduce) { .rating-hub-label, .rh-config-source, .rh-config-input, .rh-config-button { transition: none; } }',
       // ========== 榜单胶囊（v1.1.0 新增） ==========
-      '.rating-hub-rank-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 5px 0; }',
+      // 让豆瓣原生 .top250（默认 block）变 inline-flex，这样我们的胶囊能和它并排
+      '.top250:has(+ .rating-hub-rank-marks), .rank-label.rank-label-other:has(+ .rating-hub-rank-marks) { display: inline-flex !important; vertical-align: middle; margin-right: 0 !important; }',
+      '.rating-hub-rank-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 5px 0; vertical-align: middle; }',
       '.rating-hub-rank-divider { color: #d0ccc2; padding: 0 4px; font-weight: 300; user-select: none; }',
-      '.rating-hub-mark { display: inline-flex; align-items: center; font: 12px Helvetica, Arial, sans-serif; height: 18px; line-height: 18px; border-radius: 3px; overflow: hidden; background: linear-gradient(180deg, #faf0dc 0%, #f0d2a0 50%, #e8b870 100%); border: 1px solid #d4b078; color: #835000; }',
-      '.rating-hub-mark-no { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 100%; font-weight: 600; color: #8d5500; background: linear-gradient(180deg, #e8c878 0%, #d4a858 100%); border-right: 1px solid #c89848; }',
-      '.rating-hub-mark-no > span { height: 18px; line-height: 18px; }',
-      '.rating-hub-mark-link { display: inline-block; padding: 0 7px 0 5px; }',
-      '.rating-hub-mark-link a { color: #835000; text-decoration: none; }',
-      '.rating-hub-mark-link a:hover { text-decoration: underline; }',
+      // ===== 内联豆瓣原生 rank-label CSS（带 base64 PNG 纹理）=====
+      // 目的：即使条目页没有豆瓣原生 .rank-label 导致豆瓣 CSS 未加载时，我们的胶囊仍然正确渲染
+      '.rating-hub-rank-marks .rank-label { align-items:center; border-radius:3px; display:inline-flex; font:12px Helvetica,Arial,sans-serif; margin:5px 0; overflow:hidden; position:relative; }',
+      '.rating-hub-rank-marks .rank-label:before { background:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAkCAYAAACJ8xqgAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAFKADAAQAAAABAAAAJAAAAAAT/Eh7AAABQElEQVRIDbXVQXLDIAyFYdPpCbvrtvc/A7QN+mCixjNdiCwCT8jW7yeM29fnx7h+fo+/30n8WpuTEQu09XVB5NFvK6Fo8p7J3Lf3udICjba+xnSDekKVBxOidLumOX30R4ReZDeTA4TRRs1SuAexOG39bqwntM+yh1d4uONYJ5t96Xr6BKFX4dmVwdsAo2W1uMw2pOsJOxOUCgT7zjqNUNfF6XrCEe/spU2BsLs7A1k7n/aDzdkBQqbwEmGUBp6W1wPpvrx6QqeNcw+wMZOJ5+7T9YS6xAsE/x1z9+sJt4fPTLzTPXplOXw8Yuh6wuXBUHIyKOxTs3QgOl3E6QOEUSJ3GbnThOZhjtP1hHddRpLJ7uLy6gm3d6nLsfG84zsP4+vxBOGs9IcggPeJ/pooRw8Q5hKhkS0PfXtu8oXLCb8B7eSfBHIa+p4AAAAASUVORK5CYII=) repeat-x 100%/auto 100%; content:""; height:100%; left:0; position:absolute; top:0; width:100%; }',
+      '.rating-hub-rank-marks .rank-label span { height:18px; line-height:18px; position:relative; text-align:center; }',
+      '.rating-hub-rank-marks .rank-label a { background:none; color:#ffc46c; display:inline-block; height:100%; text-decoration:none; }',
+      '.rating-hub-rank-marks .rank-label .rank-label-no { border-radius:2px; color:#8d5500; overflow:hidden; position:relative; width:54px; }',
+      '.rating-hub-rank-marks .rank-label .rank-label-no:before { background:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADgAAAASCAYAAAAOsR1OAAAABGdBTUEAALGPC/xhBQAAAwRJREFUSA3VVz1rVFEQndlNJIVFGmutDBrQRvAvaGH6CEmlBPE/iJDfICJW2tiIRdKIIP4BOxEE0WBlYaHgxpDdvHedc/eet7N378tuYixy4e2ZO3PmzNyP/dKw825BOvtPROdXRHVRTuOo+g/0wo3NUusavr1+ZotbLwVFzRvsAWLQBv6Pcdx6qgOpd2/q+Vtv87ZsgW9+ntqT86vR8EOq+qqd5HfvnrPJooR0JMfdQa94FPsk6wU5Jxq2QgjXVbVmGx0R2OkJDr3N+FTERkED6G1Xw2v4GtG2HOIs+V4r2npNdrYfW/FmdIanlxqKJ4ki6UER+pqmE9fHGr4tJPK5UeAmH3WIpXwsLmoBve36OCwfmt0zd8PXV+tcoZ1gSmYiEf7aihBh5w9jQDzc/dhcyqXPc6njfdTwyFzqNYtnz1aj8SW7rlS6C4/C55fLWOTcsCmYLSMuuC0GP4oxTqMNQWdsmDqZzzdm0hzjp9ySD/QYtpdazkp3/oV5rmjY2XYVk+isgEzfD21gaaAxtSAbpA08iZH3M9i/lE6QBXJGXhU8clIMU47YuFtAs3qnH/kpiXajAYM1KOqRMac3xjc/e4hpfbuio/tlLlYienHY9BPzOArjvccGaAMxpsXB8drgY96ml/PdvB580KXbn+wEIeBFvY2EowzmEpFbsku+Uh3yiLlenkNe3ZP9/iqiaYEkgsBdg4922sFs2mwudafFJxJYl5gL0D8rWiPaCXKwe1+X1z4iy64orw9F2C3mtBNm05hBX4E+ES87onf4QjGiC81qHvSe6tLac9KHJ5gOaOoGM6sNpx0A+ianpMFYWz/T4jJ4Lxe/3PPStsDql1Ud/U36h83LD9wXauzD9BkjIqlkl3xiP7YHv1dUH45dyY5U/a2himXxAwfo7Vgl85Xi5LWhz/E2+d7nbcZzHHEG0u+t6uWNsX8S2J85Wag2ZO8PfsPZH97O4tinfEh3IiLoNvzu1TbBlzSwNEpXCjzSc6QWv/hn0cd5VXubunxn4r8gSv0Fuc0yllCH+SkAAAAASUVORK5CYII=) no-repeat 100%/auto 100%; content:""; height:100%; left:0; position:absolute; top:0; width:100%; }',
+      '.rating-hub-rank-marks .rank-label-link { display:inline-block; padding:0 7px 0 5px; }',
+      '.rating-hub-rank-marks .rank-label-other:before { background-image:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAkCAYAAACJ8xqgAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAFKADAAQAAAABAAAAJAAAAAAT/Eh7AAABMElEQVRIDbWWURLCIAxEiePxPZsnUqJT9sVpKONP8AeWAnksSav158Nb4e9WuNex1b35+3pPuE2P0SHHgLUxwdvQGwj764iZAJqZIneRSHMcY4FOgN5AKA/xAoLmIpNH6HhOB1LpHYRde6dQECza8JiTyOMdhOOWs4fkFeNogAWGDIt3EI5KWTm4Gg+01NlAqEr5lsYpFgpCNJPwkGXoekJrIw+J8CMQmxA8TYg8TLVeT+jykIgQRouJMTA6nsjQ9YTmeLhASWRITgQZup7QnVomtjySJP8yf7r0jbVsfPVIechA0LihzweZVL2HfJdnALnm1y7m9yR6HyEckyl/BvK6esJlLWMqt4+GGDQSVLqekPdhpDoE0z8GkDQBMuZL1xOShwSKFs9WHsbEc6ec8AO6ZIJn9ClyFgAAAABJRU5ErkJggg==); }',
+      '.rating-hub-rank-marks .rank-label-other .rank-label-no:before { background-image:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADgAAAASCAYAAAAOsR1OAAAABGdBTUEAALGPC/xhBQAAA0dJREFUSA2tVztrVUEQnrm5RrARAoJXkAjJL9DSSiwMBAQRBFECEhEsrO2CpPI/pBAECxuxECJW/gFLqzR5QIIp0lkEkrvOt2e/kz1z9uTcKxm4Z2bn8c3Mzp7H1RB+z8rhwbpIWJGxjETFRPuBKIP/F3kAAFNXAPRmunblp78MXun1+xsFRNHw58d7GYe3JePUumAZ1aoBB1EGB/XZK6/ua3f8sQzlrl578MsHazjY3LeJjSoDtyQV6L292Tfg/XvXLUCLoK4UTBs4KBuxyo5c0dt6demoslXXoYxPU3MMGKdArD1gUsEEYh7ySjvFFQXm+SiDT0lB5uWvfgohLKtqDTCUUMtTIhbcsw2N1sL+FKLOVH3xffYgS7L/bc0A3xFUw97XECcNjT/j+RGAvZXAOuAxjXZzIAbWlMFB9K3vSejsV5+Anh1pxRfyA21msKyjh5sxZdj7UsND0SBfYMNoi0kSEgOxlLsa9vh9/t32IxnqHR092sY9eAbL3QQHsXXylj0pQgqIhZvMBnKMXCZerqPMHFhDxh2U4Gs5v6tyLDhWNczJiXywyHsadj43XEw5OXXvYBljWv8ySrcWneQbNKvz1QR5T8SR5R4eizbwRI1ppe2uH1zOv9rdbMJmpy7CuQrdsnVLtOr1eDP2esTcecRaAexiUo6GzjtTKCCzU643xOdxBU/izx5Uf+qNJ7sX+5rw9fk1+udUYKMMfpGkciTh0gtATtdgX4F9dh7HxrHOOvNP5cwURb8hrXzmMBjgtfdcbz3dRow1aE9R3oN9AGNzgC84KRPjRKAv6aI/KsqOqC9wbLaID58CMTfr9fVE+8m6LqzGdyAQNGxtWMfIZISdhZzvcGWprr6g3FaUfQA6p85Et6xNcAG17GZgjdHu6lX9Lgur7lNNxwcGdPY9ClCSTwD9eXbW3lUgccnhlw00now4hZSEMgdAXw44j1fdkcv6LP8ORZqB7cjH+GTDEwovffL4AZB0sQqT41Ms8Vye1E4/8hwDct8PcYyBzBrD6bHIyWO9+bLxTwINDmVxbk22Di1QV+wyak4ojaR+jSAkp9KIc7uTvXuCj0czupoiNgCDEeXIK1XzSv+ZN7r4uvVfEL7/AK5h3BZxtIRYAAAAAElFTkSuQmCC); color:#835000; }',
+      '.rating-hub-rank-marks .rank-label-other a { color:#835000; }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -2918,11 +2926,12 @@
 
     _buildMark(mark) {
       const el = document.createElement('div');
-      el.className = 'rating-hub-mark';
+      // 复用豆瓣原生类名让豆瓣 CSS（或我们内联的同名 CSS）自动作用于此元素
+      el.className = 'rank-label rank-label-other rating-hub-mark';
       el.setAttribute('data-source', mark.sourceId);
       el.innerHTML = ''
-        + '<span class="rating-hub-mark-no"><span>' + escapeHtml(this._formatRank(mark)) + '</span></span>'
-        + '<span class="rating-hub-mark-link">'
+        + '<span class="rank-label-no"><span>' + escapeHtml(this._formatRank(mark)) + '</span></span>'
+        + '<span class="rank-label-link">'
         +   '<a href="' + escapeHtml(mark.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(mark.title) + '</a>'
         + '</span>';
       return el;
