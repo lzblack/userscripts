@@ -78,6 +78,75 @@
   };
 
   // ============================================================
+  // Util — 给榜单功能用的小工具（v1.1.0 新增）
+  // ============================================================
+
+  /**
+   * HTML 转义 — 用于安全地把字符串插入 innerHTML。
+   * @param {*} input
+   * @returns {string}
+   */
+  function escapeHtml(input) {
+    return String(input == null ? '' : input)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  const DEFAULT_RANKING_PREFS = {
+    showRankingMarks: true,
+    enabledSources: {},  // 空对象 = 所有 source 默认启用
+  };
+
+  /**
+   * 把用户配置归一化为合法形态，防止损坏数据导致崩溃。
+   * 未列在 enabledSources 里的 source 默认启用。
+   * @param {*} raw
+   * @returns {{showRankingMarks: boolean, enabledSources: object}}
+   */
+  function normalizeRankingPrefs(raw) {
+    const next = {
+      showRankingMarks: DEFAULT_RANKING_PREFS.showRankingMarks,
+      enabledSources: { ...DEFAULT_RANKING_PREFS.enabledSources },
+    };
+    if (!raw || typeof raw !== 'object') return next;
+    next.showRankingMarks = raw.showRankingMarks !== false;
+    if (raw.enabledSources && typeof raw.enabledSources === 'object') {
+      next.enabledSources = { ...raw.enabledSources };
+    }
+    return next;
+  }
+
+  /**
+   * 并发限流门 — 手工维护活跃数，避免 Promise.all 一次性发大量请求。
+   * v1 用不上（只请求 1-2 个 JSON），为 v2 多源并发预留。
+   * @param {number} maxConcurrency
+   */
+  function ConcurrencyGate(maxConcurrency) {
+    let active = 0;
+    const queue = [];
+    function next() {
+      if (active >= maxConcurrency || queue.length === 0) return;
+      active += 1;
+      const { fn, resolve, reject } = queue.shift();
+      Promise.resolve().then(fn).then(
+        (v) => { active -= 1; resolve(v); next(); },
+        (e) => { active -= 1; reject(e); next(); }
+      );
+    }
+    return {
+      run(fn) {
+        return new Promise((resolve, reject) => {
+          queue.push({ fn, resolve, reject });
+          next();
+        });
+      },
+    };
+  }
+
+  // ============================================================
   // PageAdapter — 识别条目类型，从 DOM 提取元信息
   // ============================================================
 
