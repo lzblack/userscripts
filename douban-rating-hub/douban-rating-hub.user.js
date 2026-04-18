@@ -2839,6 +2839,33 @@
     },
   };
 
+  /**
+   * 榜单胶囊入口 — 读配置、拉数据、匹配当前 subject、渲染。
+   * 独立于现有评分流程，失败不影响其他功能。
+   */
+  async function rankingMarksMain(meta) {
+    try {
+      if (!meta || !meta.doubanId) return;
+
+      // 仅 v1 支持的 category
+      const supportedCategories = ['movie'];
+      if (supportedCategories.indexOf(meta.type) === -1) return;
+
+      const prefs = normalizeRankingPrefs(deps.storage.get('rating_hub_ranking_prefs_v1'));
+      if (!prefs.showRankingMarks) return;
+
+      const data = await RankingData.getForCategory(meta.type);
+      if (!data) return;
+
+      const marks = resolveMarksForSubject(data, meta.type, meta.doubanId, prefs);
+      if (marks.length === 0) return;
+
+      RankingRenderer.mount(marks);
+    } catch (e) {
+      deps.log('rankingMarksMain error:', e);
+    }
+  }
+
   // ============================================================
   // init — 主入口
   // ============================================================
@@ -2896,6 +2923,9 @@
     }
 
     deps.log('Initialized for', meta.type, ':', meta.title, '| EN:', meta.originalTitle || '(none)', '| IMDB:', meta.imdbId || '(none)');
+
+    // v1.1.0: 榜单胶囊（独立于评分流程，异步并行）
+    rankingMarksMain(meta);
   }
 
   // DOM 就绪后执行
