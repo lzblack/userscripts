@@ -2875,6 +2875,7 @@
         url: sourceMeta.url,
         rank: r.rank == null ? null : r.rank,
         spineNumber: r.spineNumber || null,
+        externalId: r.externalId || null,            // 过渡期 fallback：CC 条目可能只有 externalId
         priority: typeof sourceMeta.priority === 'number' ? sourceMeta.priority : 99,
       });
     }
@@ -2930,6 +2931,10 @@
     _formatRank(mark) {
       if (mark.rank != null) return 'No.' + mark.rank;
       if (mark.spineNumber) return '#' + mark.spineNumber;
+      // Fallback：过渡期 scraper 尚未加 spineNumber 字段时，
+      // Criterion 源的 externalId 就是 spine 号，可以直接用。
+      // 等 scraper 产出 spineNumber 后这段 fallback 自然不触发（可保留作防御）。
+      if (mark.sourceId === 'criterion' && mark.externalId) return '#' + mark.externalId;
       return '—';
     },
 
