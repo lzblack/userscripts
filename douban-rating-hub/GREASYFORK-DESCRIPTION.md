@@ -1,4 +1,4 @@
-豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。
+豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。**v1.1.0 起新增：在 title 上方显示外部权威榜单胶囊**（IMDb Top 250、Criterion Collection 等，视觉与豆瓣原生一致）。
 
 ## 支持的平台
 
@@ -31,7 +31,8 @@ NeoDB
 - **限频保护** — 自动检测平台限流并跨页冷却
 - **已包含 NeoDB** — 无需另外安装「豆瓣条目 NeoDB 评分增强」，本脚本已覆盖 NeoDB 评分
 - **平台图标** — 每个评分源显示对应平台的小图标
-- **可配置** — Tampermonkey 菜单中可设置 API Key、开关各评分源
+- **榜单胶囊**（v1.1.0+）— title 上方显示外部权威榜单（IMDb Top 250、Criterion Collection 等），数据来自 `rank.douban.zhili.dev` 的静态 JSON，客户端缓存 24 小时，断网静默降级
+- **可配置** — Tampermonkey 菜单中可设置 API Key、开关各评分源与榜单
 
 ## 配置
 

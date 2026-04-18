@@ -1,6 +1,6 @@
 # 豆瓣评分汇 | Douban Rating Hub
 
-豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。
+豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。**v1.1.0 起新增：在 title 上方显示外部权威榜单胶囊**（IMDb Top 250、Criterion Collection 等）。
 
 ## 支持的平台
 
@@ -42,6 +42,13 @@
 - **限频保护** — 自动检测并跨页冷却
 - **平台图标** — 每行显示对应平台小图标
 - **豆瓣 IMDb 链接化** — 将页面上的 IMDb ID 纯文本变为可点击链接
+- **榜单胶囊**（v1.1.0+）— 在 title 上方显示该条目所在的外部权威榜单（IMDb Top 250、Criterion Collection 等），视觉与豆瓣原生 `.rank-label-other` 一致
+
+## 榜单数据来源
+
+榜单胶囊的数据由独立项目 [douban-rankings](https://github.com/lzblack/douban-rankings) 每周自动爬取并整理，以静态 JSON 形式发布在 `https://rank.douban.zhili.dev`（hosting-agnostic —— 底层可以是 GitHub Pages / Cloudflare Pages / 其他静态托管，域名稳定）。rating-hub 客户端缓存 24 小时，断网或端点不可达时静默降级，不影响其他评分源。
+
+可在 ⚙ 评分汇设置 → "⭐ 榜单显示" section 管理要展示的榜单，或通过 Tampermonkey 菜单 "🔄 强制刷新榜单数据" 手动刷新缓存。
 
 ## 关于 NeoDB
 
