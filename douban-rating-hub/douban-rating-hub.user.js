@@ -646,6 +646,9 @@
     footnote.textContent = '来源开关会在刷新当前页面后生效。';
     panel.appendChild(footnote);
 
+    // v1.1.0: 榜单显示 section
+    buildRankingPrefsSection(panel);
+
     // 按钮行
     const btnRow = document.createElement('div');
     btnRow.className = 'rh-config-actions';
@@ -704,6 +707,100 @@
     activeConfigKeydownHandler = onKeyDown;
     document.addEventListener('keydown', activeConfigKeydownHandler);
     tmdbInput.focus();
+  }
+
+  /**
+   * v1.1.0: 在配置面板里添加"⭐ 榜单显示" section。
+   * 读 cache 里已识别的 source 列表生成 checkbox；每个 checkbox 变化立刻保存。
+   */
+  function buildRankingPrefsSection(panelEl) {
+    const section = document.createElement('div');
+    section.className = 'rh-config-disclosure';
+    section.id = 'rh-config-ranking-section';
+
+    const heading = document.createElement('h4');
+    heading.textContent = '⭐ 榜单显示';
+    heading.style.cssText = 'margin:14px 0 8px;font-size:13px;color:#333;';
+    section.appendChild(heading);
+
+    const prefs = normalizeRankingPrefs(deps.storage.get('rating_hub_ranking_prefs_v1'));
+
+    // 总开关
+    const masterLabel = document.createElement('label');
+    masterLabel.className = 'rh-config-source';
+    masterLabel.innerHTML = ''
+      + '<input type="checkbox" class="rh-config-checkbox" ' + (prefs.showRankingMarks ? 'checked' : '') + '>'
+      + '<span class="rh-config-source-text">'
+      +   '<span class="rh-config-source-name">显示榜单胶囊（总开关）</span>'
+      + '</span>';
+    const masterCheckbox = masterLabel.querySelector('input');
+    masterCheckbox.addEventListener('change', function () {
+      const cur = normalizeRankingPrefs(deps.storage.get('rating_hub_ranking_prefs_v1'));
+      cur.showRankingMarks = !!masterCheckbox.checked;
+      deps.storage.set('rating_hub_ranking_prefs_v1', cur);
+    });
+    section.appendChild(masterLabel);
+
+    // 读已识别的 source（只读 cache，不发起网络请求）
+    const cacheKey = 'rating_hub_rankings_cache_v1:movie';
+    const cached = deps.storage.get(cacheKey);
+    const sources = (cached && cached.data && cached.data.categories
+      && cached.data.categories.movie && cached.data.categories.movie.sources) || {};
+    const sourceIds = Object.keys(sources);
+
+    if (sourceIds.length === 0) {
+      const hint = document.createElement('p');
+      hint.style.cssText = 'color:#888;font-size:12px;margin:8px 0 0;';
+      hint.textContent = '榜单数据尚未加载。访问一次豆瓣电影条目页后回来此处即可看到已识别的榜单。';
+      section.appendChild(hint);
+    } else {
+      const listLabel = document.createElement('div');
+      listLabel.style.cssText = 'color:#888;font-size:12px;margin:8px 0 4px;';
+      listLabel.textContent = '启用的榜单（已识别）：';
+      section.appendChild(listLabel);
+
+      sourceIds.sort(function (a, b) {
+        return (sources[a].priority || 99) - (sources[b].priority || 99);
+      });
+
+      sourceIds.forEach(function (sid) {
+        const src = sources[sid];
+        const enabled = prefs.enabledSources[sid] !== false;
+        const label = document.createElement('label');
+        label.className = 'rh-config-source';
+        const kindText = src.kind === 'permanent' ? '永久' : (src.kind === 'yearly' ? '年度' : '时效');
+        label.innerHTML = ''
+          + '<input type="checkbox" class="rh-config-checkbox" ' + (enabled ? 'checked' : '') + '>'
+          + '<span class="rh-config-source-text">'
+          +   '<span class="rh-config-source-name">' + escapeHtml(src.titleZh || src.title || sid) + '</span>'
+          +   '<span class="rh-config-source-meta">' + escapeHtml(kindText + ' · ' + (src.itemCount || '?')) + '</span>'
+          + '</span>';
+        const cb = label.querySelector('input');
+        cb.addEventListener('change', function () {
+          const cur = normalizeRankingPrefs(deps.storage.get('rating_hub_ranking_prefs_v1'));
+          cur.enabledSources[sid] = !!cb.checked;
+          deps.storage.set('rating_hub_ranking_prefs_v1', cur);
+        });
+        section.appendChild(label);
+      });
+    }
+
+    // 数据来源提示 + 刷新按钮
+    const footer = document.createElement('div');
+    footer.style.cssText = 'margin-top:10px;color:#888;font-size:12px;';
+    footer.innerHTML = '数据每周更新自 <code>rank.douban.zhili.dev</code> ';
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'rh-config-button rh-config-button-secondary';
+    refreshBtn.style.cssText = 'padding:2px 10px;font-size:12px;min-height:24px;margin-left:6px;';
+    refreshBtn.textContent = '🔄 强制刷新缓存';
+    refreshBtn.addEventListener('click', function () {
+      RankingData.forceRefresh();
+      alert('榜单缓存已清空。刷新页面后会重新拉取数据。');
+    });
+    footer.appendChild(refreshBtn);
+    section.appendChild(footer);
+
+    panelEl.appendChild(section);
   }
 
   function registerMenu(sources) {
