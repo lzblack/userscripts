@@ -805,6 +805,12 @@
 
   function registerMenu(sources) {
     GM_registerMenuCommand('⚙ 评分汇设置', function () { openConfigPanel(sources); });
+    GM_registerMenuCommand('🔄 强制刷新榜单数据', function () {
+      RankingData.forceRefresh();
+      if (confirm('榜单缓存已清空。立即刷新页面？')) {
+        location.reload();
+      }
+    });
   }
 
   // ============================================================
