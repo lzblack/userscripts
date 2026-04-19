@@ -2,7 +2,7 @@
 // @name         豆瓣条目 NeoDB 评分增强
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.0.6
+// @version      1.0.7
 // @author       lzblack
 // @description  在豆瓣条目页（书籍、电影、音乐、游戏）上添加 NeoDB.social 的评分展示（含条目链接）
 // @match        https://book.douban.com/subject/*
@@ -416,6 +416,7 @@
         GM_xmlhttpRequest({
           method: 'GET',
           url: searchUrl,
+          anonymous: true,
           onload: (resp) => {
             try {
               if (resp.status < 200 || resp.status >= 300) {
@@ -463,6 +464,7 @@
               GM_xmlhttpRequest({
                 method: 'GET',
                 url: detailUrl,
+                anonymous: true,
                 onload: (detailResp) => {
                   try {
                     if (detailResp.status < 200 || detailResp.status >= 300) {
