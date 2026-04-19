@@ -876,6 +876,8 @@
       // 让豆瓣原生 .top250（默认 block）变 inline-flex，这样我们的胶囊能和它并排
       '.top250:has(+ .rating-hub-rank-marks), .rank-label.rank-label-other:has(+ .rating-hub-rank-marks) { display: inline-flex !important; vertical-align: middle; margin-right: 0 !important; }',
       '.rating-hub-rank-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 5px 0; vertical-align: middle; }',
+      // 我们容器紧跟豆瓣原生胶囊时，补 6px 左间距保持节奏一致
+      '.top250 + .rating-hub-rank-marks, .rank-label.rank-label-other + .rating-hub-rank-marks { margin-left: 6px; }',
       // ===== 内联豆瓣原生 rank-label CSS（带 base64 PNG 纹理）=====
       // 目的：即使条目页没有豆瓣原生 .rank-label 导致豆瓣 CSS 未加载时，我们的胶囊仍然正确渲染
       '.rating-hub-rank-marks .rank-label { align-items:center; border-radius:3px; display:inline-flex; font:12px Helvetica,Arial,sans-serif; margin:5px 0; overflow:hidden; position:relative; }',
