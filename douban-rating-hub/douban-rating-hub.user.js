@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.0
+// @version      1.1.1
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -58,6 +58,10 @@
           url,
           headers: opts.headers || {},
           data: opts.data || undefined,
+          // 默认匿名 — 评分 channel 查的是公开数据，绝不能带用户的
+          // Amazon/Goodreads/weread 等站点 cookie，否则返回个性化结果会污染
+          // 通用评分视角。调用方若需带 cookie 显式传 anonymous:false。
+          anonymous: opts.anonymous !== false,
           onload(resp) { resolve(resp); },
           onerror(err) { reject(new Error('Request failed: ' + url)); },
         });
@@ -2833,6 +2837,7 @@
           method: 'GET',
           url,
           timeout: 15000,
+          anonymous: true,                      // 榜单数据是公开静态 JSON，不需要也不应该带 cookie
           onload(resp) {
             if (resp.status < 200 || resp.status >= 300) {
               reject(new Error('HTTP ' + resp.status + ' for ' + url));

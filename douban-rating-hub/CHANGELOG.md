@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-19
+
+### Security / Privacy
+- **GM_xmlhttpRequest 改为默认匿名请求**：`deps.request` 默认传 `anonymous: true`，`RankingData._fetchJson` 也匿名
+  - 修复：查询 Amazon/Goodreads/微信读书等评分时会带浏览器 cookie，导致返回**个性化**搜索结果（如搜 ISBN 看到自己账号相关内容）。匿名模式拿通用公开数据，更符合"评分聚合"的语义
+  - 用户影响：升级后建议点 Tampermonkey 菜单 "🔄 强制刷新榜单数据" 清旧 cache（可能含个性化结果的旧链接）
+
 ## [1.1.0] - 2026-04-19
 
 ### Added
