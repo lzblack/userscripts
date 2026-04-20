@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-04-20
+
+### Fixed
+- **music / non-standard 页面找不到 anchor 导致胶囊不显示**：`RankingRenderer._findAnchor` 放宽 fallback，从只认 `#content > h1` 扩展到 `#content h1` 和顶层 `h1`。修复 music 条目页（如 Midnights）命中 Grammy 后胶囊静默消失的问题
+- **Grammy 胶囊左槽显示"—"**：`_formatRank` 对 Grammy source 从 `externalId`（形如 `grammy-aoty-2024`）提取年份，左槽改显示 `2024` 等，更直观
+
 ## [1.1.2] - 2026-04-20
 
 ### Changed
@@ -57,7 +63,8 @@ Prior version history — see `git log` for details. Highlights:
 - 支持 16+ 个评分平台：IMDB、烂番茄、Metacritic、Letterboxd、TMDB、NeoDB、Goodreads、Amazon、微信读书、Bangumi、MAL、Discogs、Steam、苹果播客、小宇宙等
 - 智能匹配、缓存、限频保护、豆瓣 IMDb 链接化等基础能力
 
-[Unreleased]: https://github.com/lzblack/userscripts/compare/rating-hub-v1.1.2...HEAD
+[Unreleased]: https://github.com/lzblack/userscripts/compare/rating-hub-v1.1.3...HEAD
+[1.1.3]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.3
 [1.1.2]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.2
 [1.1.1]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.1
 [1.1.0]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.0
