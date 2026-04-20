@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.2
+// @version      1.1.3
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -2924,7 +2924,11 @@
     _findAnchor() {
       const native = document.querySelector('.top250, .rank-label.rank-label-other');
       if (native) return { el: native, placement: 'afterend' };
-      const h1 = document.querySelector('#content > h1');
+      // fallback：豆瓣各品类 h1 结构不一致（电影 #content > h1；
+      // music 页 h1 可能深嵌），放宽 selector
+      const h1 = document.querySelector('#content > h1')
+              || document.querySelector('#content h1')
+              || document.querySelector('h1');
       if (h1) return { el: h1, placement: 'beforebegin' };
       return null;
     },
@@ -2957,8 +2961,12 @@
       if (mark.spineNumber) return '#' + mark.spineNumber;
       // Fallback：过渡期 scraper 尚未加 spineNumber 字段时，
       // Criterion 源的 externalId 就是 spine 号，可以直接用。
-      // 等 scraper 产出 spineNumber 后这段 fallback 自然不触发（可保留作防御）。
       if (mark.sourceId === 'criterion' && mark.externalId) return '#' + mark.externalId;
+      // Grammy 年度专辑：externalId 形如 'grammy-aoty-2024'，左槽显示年份更直观
+      if (mark.sourceId && String(mark.sourceId).startsWith('grammy') && mark.externalId) {
+        const m = String(mark.externalId).match(/(\d{4})/);
+        if (m) return m[1];
+      }
       return '—';
     },
 
