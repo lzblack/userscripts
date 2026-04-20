@@ -7,13 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.3] - 2026-04-20
+## [1.1.3] - 2026-04-19
 
 ### Fixed
 - **music / non-standard 页面找不到 anchor 导致胶囊不显示**：`RankingRenderer._findAnchor` 放宽 fallback，从只认 `#content > h1` 扩展到 `#content h1` 和顶层 `h1`。修复 music 条目页（如 Midnights）命中 Grammy 后胶囊静默消失的问题
 - **Grammy 胶囊左槽显示"—"**：`_formatRank` 对 Grammy source 从 `externalId`（形如 `grammy-aoty-2024`）提取年份，左槽改显示 `2024` 等，更直观
 
-## [1.1.2] - 2026-04-20
+## [1.1.2] - 2026-04-19
 
 ### Changed
 - **category 动态发现**：去掉 `rankingMarksMain` 里硬编码的 `supportedCategories = ['movie']`，完全依赖 upstream `manifest.categories` 决定消费哪些品类。副作用：**music 品类立刻生效**（豆瓣音乐条目页自动显示 Grammy 等榜单胶囊）；未来 upstream 加新 category 时 consumer 零改动
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 修复：查询 Amazon/Goodreads/微信读书等评分时会带浏览器 cookie，导致返回**个性化**搜索结果（如搜 ISBN 看到自己账号相关内容）。匿名模式拿通用公开数据，更符合"评分聚合"的语义
   - 用户影响：升级后建议点 Tampermonkey 菜单 "🔄 强制刷新榜单数据" 清旧 cache（可能含个性化结果的旧链接）
 
-## [1.1.0] - 2026-04-19
+## [1.1.0] - 2026-04-18
 
 ### Added
 - **榜单胶囊功能**：豆瓣电影条目页 title 上方显示外部权威榜单标记，视觉与豆瓣原生 `.rank-label-other` 一致
