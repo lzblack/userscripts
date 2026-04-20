@@ -1,6 +1,6 @@
 # 豆瓣评分汇 | Douban Rating Hub
 
-豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。**v1.1.0 起新增：在 title 上方显示外部权威榜单胶囊**（IMDb Top 250、Criterion Collection 等）。
+豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。**v1.1.0 起新增：在 title 上方显示外部权威榜单胶囊**（电影/剧集：IMDb Top 250、CC 标准收藏、AFI 百年百大、BFI 影史百大、Letterboxd 人气 250、BBC 21 世纪百大剧集、滚石 100 最伟大电视剧、TSPDT 等；音乐：Grammy 年度专辑）。
 
 ## 支持的平台
 
