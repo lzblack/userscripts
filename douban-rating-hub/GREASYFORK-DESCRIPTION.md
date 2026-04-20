@@ -31,7 +31,7 @@ NeoDB
 - **限频保护** — 自动检测平台限流并跨页冷却
 - **已包含 NeoDB** — 无需另外安装「豆瓣条目 NeoDB 评分增强」，本脚本已覆盖 NeoDB 评分
 - **平台图标** — 每个评分源显示对应平台的小图标
-- **榜单胶囊**（v1.1.0+）— title 上方显示外部权威榜单（IMDb Top 250、Criterion Collection 等），数据来自 `rank.douban.zhili.dev` 的静态 JSON，客户端缓存 24 小时，断网静默降级
+- **榜单胶囊**（v1.1.0+）— title 上方显示外部权威榜单。电影/剧集：IMDb Top 250、CC 标准收藏、AFI 百年百大、BFI 影史百大、Letterboxd、BBC 21 世纪百大剧集、滚石 100 最伟大电视剧等。音乐：Grammy 等。数据来自 `rank.douban.zhili.dev` 静态 JSON，客户端缓存 24 小时，断网静默降级
 - **可配置** — Tampermonkey 菜单中可设置 API Key、开关各评分源与榜单
 
 ## 配置
