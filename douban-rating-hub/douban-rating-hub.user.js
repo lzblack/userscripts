@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.1
+// @version      1.1.2
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -745,17 +745,30 @@
     });
     section.appendChild(masterLabel);
 
-    // 读已识别的 source（只读 cache，不发起网络请求）
-    const cacheKey = 'rating_hub_rankings_cache_v1:movie';
-    const cached = deps.storage.get(cacheKey);
-    const sources = (cached && cached.data && cached.data.categories
-      && cached.data.categories.movie && cached.data.categories.movie.sources) || {};
+    // 汇总所有 category cache 里已识别的 source（v1 起不再只读 movie）
+    const storageKeys = deps.storage.listKeys();
+    const CACHE_PREFIX = 'rating_hub_rankings_cache_v1:';
+    const sources = {};
+    const sourceCategory = {};  // 记录每个 source 属哪个 category，用于 "启用的榜单（movie · 电影）"
+    for (let i = 0; i < storageKeys.length; i++) {
+      const k = storageKeys[i];
+      if (k.indexOf(CACHE_PREFIX) !== 0) continue;
+      const cat = k.slice(CACHE_PREFIX.length);
+      const cached = deps.storage.get(k);
+      const cs = cached && cached.data && cached.data.categories
+        && cached.data.categories[cat] && cached.data.categories[cat].sources;
+      if (!cs) continue;
+      Object.keys(cs).forEach(function (sid) {
+        sources[sid] = cs[sid];
+        sourceCategory[sid] = cat;
+      });
+    }
     const sourceIds = Object.keys(sources);
 
     if (sourceIds.length === 0) {
       const hint = document.createElement('p');
       hint.style.cssText = 'color:#888;font-size:12px;margin:8px 0 0;';
-      hint.textContent = '榜单数据尚未加载。访问一次豆瓣电影条目页后回来此处即可看到已识别的榜单。';
+      hint.textContent = '榜单数据尚未加载。访问一次豆瓣电影或音乐条目页后回来此处即可看到已识别的榜单。';
       section.appendChild(hint);
     } else {
       const listLabel = document.createElement('div');
@@ -763,7 +776,10 @@
       listLabel.textContent = '启用的榜单（已识别）：';
       section.appendChild(listLabel);
 
+      // 先按 category 聚类，再按 priority 排序
       sourceIds.sort(function (a, b) {
+        const catCmp = (sourceCategory[a] || '').localeCompare(sourceCategory[b] || '');
+        if (catCmp !== 0) return catCmp;
         return (sources[a].priority || 99) - (sources[b].priority || 99);
       });
 
@@ -773,11 +789,12 @@
         const label = document.createElement('label');
         label.className = 'rh-config-source';
         const kindText = src.kind === 'permanent' ? '永久' : (src.kind === 'yearly' ? '年度' : '时效');
+        const catText = sourceCategory[sid] || '?';
         label.innerHTML = ''
           + '<input type="checkbox" class="rh-config-checkbox" ' + (enabled ? 'checked' : '') + '>'
           + '<span class="rh-config-source-text">'
           +   '<span class="rh-config-source-name">' + escapeHtml(src.titleZh || src.title || sid) + '</span>'
-          +   '<span class="rh-config-source-meta">' + escapeHtml(kindText + ' · ' + (src.itemCount || '?')) + '</span>'
+          +   '<span class="rh-config-source-meta">' + escapeHtml(catText + ' · ' + kindText + ' · ' + (src.itemCount || '?')) + '</span>'
           + '</span>';
         const cb = label.querySelector('input');
         cb.addEventListener('change', function () {
@@ -2960,14 +2977,14 @@
   async function rankingMarksMain(meta) {
     try {
       if (!meta || !meta.doubanId) return;
-
-      // 仅 v1 支持的 category
-      const supportedCategories = ['movie'];
-      if (supportedCategories.indexOf(meta.type) === -1) return;
+      if (!meta.type || meta.type === 'unknown') return;
 
       const prefs = normalizeRankingPrefs(deps.storage.get('rating_hub_ranking_prefs_v1'));
       if (!prefs.showRankingMarks) return;
 
+      // 哪些 category 有数据由 upstream manifest.categories 决定，
+      // 不在 userscript 侧硬编码（upstream 加新 category 时 consumer 零改动）。
+      // RankingData.getForCategory 在 upstream 不支持此 category 时返回 null，静默降级。
       const data = await RankingData.getForCategory(meta.type);
       if (!data) return;
 

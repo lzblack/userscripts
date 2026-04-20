@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-04-20
+
+### Changed
+- **category 动态发现**：去掉 `rankingMarksMain` 里硬编码的 `supportedCategories = ['movie']`，完全依赖 upstream `manifest.categories` 决定消费哪些品类。副作用：**music 品类立刻生效**（豆瓣音乐条目页自动显示 Grammy 等榜单胶囊）；未来 upstream 加新 category 时 consumer 零改动
+- **配置面板"⭐ 榜单显示" section**：汇总所有 category cache 里的 source（之前只读 movie cache），每条 meta 前加 category 标签（`movie · 永久 · 250` / `music · 年度 · 67`）
+
+### Upstream 数据变化（无 schema 变化）
+- 新增两个 TV 榜单（在 `movie.json` 下，`subCategory: 'tv'`）：BBC 21 世纪百大剧集、滚石 100 最伟大电视剧。rating-hub **零改动**自动显示
+- Criterion 覆盖扩大到 1174 条（+44），Bangumi 扩大到 189 条（+176）
+- Grammy 扩大到 67 条（music 品类）
+- **book 品类从 manifest 移除**：历史原因——书籍多译本/多版本的 single-dbid 映射覆盖率太低。`book.json` 物理文件可能仍在 CDN 但**不再被 manifest 列出**，consumer 通过 manifest discovery 天然不会拉它
+
 ## [1.1.1] - 2026-04-19
 
 ### Security / Privacy
@@ -45,5 +57,7 @@ Prior version history — see `git log` for details. Highlights:
 - 支持 16+ 个评分平台：IMDB、烂番茄、Metacritic、Letterboxd、TMDB、NeoDB、Goodreads、Amazon、微信读书、Bangumi、MAL、Discogs、Steam、苹果播客、小宇宙等
 - 智能匹配、缓存、限频保护、豆瓣 IMDb 链接化等基础能力
 
-[Unreleased]: https://github.com/lzblack/userscripts/compare/rating-hub-v1.1.0...HEAD
+[Unreleased]: https://github.com/lzblack/userscripts/compare/rating-hub-v1.1.2...HEAD
+[1.1.2]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.2
+[1.1.1]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.1
 [1.1.0]: https://github.com/lzblack/userscripts/releases/tag/rating-hub-v1.1.0
