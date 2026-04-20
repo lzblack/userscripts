@@ -1,4 +1,4 @@
-豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。**v1.1.0 起新增：在 title 上方显示外部权威榜单胶囊**（IMDb Top 250、Criterion Collection 等，视觉与豆瓣原生一致）。
+豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台。**v1.1.0 起新增：在 title 上方显示外部权威榜单胶囊**（电影/剧集：IMDb Top 250、CC 标准收藏、AFI 百年百大、BFI 影史百大、Letterboxd 人气 250、BBC 21 世纪百大剧集、滚石 100 最伟大电视剧、TSPDT 等；音乐：Grammy 年度专辑），视觉与豆瓣原生一致。
 
 ## 支持的平台
 
@@ -39,6 +39,10 @@ NeoDB
 点击 Tampermonkey 菜单 → **⚙ 评分汇设置**：
 - 设置 TMDB API Key（可选，[申请地址](https://www.themoviedb.org/settings/api)）
 - 开关各评分源
+
+## 更新日志
+
+完整更新历史见 [GitHub Releases](https://github.com/lzblack/userscripts/releases?q=rating-hub) · [CHANGELOG](https://github.com/lzblack/userscripts/blob/main/douban-rating-hub/CHANGELOG.md)
 
 ## 反馈
 
