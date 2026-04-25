@@ -1,3 +1,5 @@
+> 如果你安装了[豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796)，就不需要本脚本了 — 评分汇已包含 NeoDB 及 IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台的评分。
+
 ## 功能简介
 
 在豆瓣条目页自动显示对应的 [NeoDB.social](https://neodb.social) 评分，并提供跳转链接。目前支持：
@@ -113,4 +115,11 @@
 - 通过 `GM_xmlhttpRequest` 调用 `neodb.social` 的公开页面，解析 HTML 中的评分信息。
 - 不会对豆瓣或 NeoDB 执行任何写操作，也不会读取你的登录状态或发送你的个人信息。
 
+---
 
+## 同作者的其他豆瓣增强脚本
+
+- [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 聚合 16 个平台评分（已包含 NeoDB）
+- [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
+- [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一本书的其他版本
+- [豆瓣广播标记助手](https://greasyfork.org/zh-CN/scripts/572857) — 在首页广播流中显示你的书影音游标记状态和评分

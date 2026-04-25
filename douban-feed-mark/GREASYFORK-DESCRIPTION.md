@@ -38,3 +38,11 @@
 - 仅匹配 `https://www.douban.com/` 首页，不会在其它页面注入
 - 通过豆瓣内部接口读取你自己的标记状态，不会执行任何写操作
 - 缓存数据存储在本地（Tampermonkey 存储），不会发送到任何外部服务
+
+---
+
+## 同作者的其他豆瓣增强脚本
+
+- [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 聚合 IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台的评分
+- [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
+- [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一本书的其他版本
