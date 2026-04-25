@@ -26,3 +26,11 @@
 - 仅匹配 `https://book.douban.com/subject/*`，不会在其它页面注入。
 - 仅读取豆瓣公开页面和你自己的标记状态，不会执行任何写操作。
 - 不使用任何外部服务，所有请求都发往 douban.com。
+
+---
+
+## 同作者的其他豆瓣增强脚本
+
+- [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 聚合 IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台的评分
+- [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
+- [豆瓣广播标记助手](https://greasyfork.org/zh-CN/scripts/572857) — 在首页广播流中显示你的书影音游标记状态和评分

@@ -20,7 +20,7 @@
 
 ## 安装
 
-[GreasyFork 安装页面](https://greasyfork.org/zh-CN/scripts/529498)
+[GreasyFork 安装页面](https://greasyfork.org/zh-CN/scripts/572857)
 
 ## 支持的条目类型
 
