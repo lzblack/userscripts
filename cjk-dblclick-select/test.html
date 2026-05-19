@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CJK dblclick test</title>
+<style>
+  body { font: 16px/1.7 system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
+  .case { border-left: 3px solid #ccc; padding: .4em .8em; margin: .8em 0; }
+  .case b { color: #06c; }
+  code { background: #f4f4f4; padding: 0 .3em; }
+  input { font-size: 16px; padding: .2em .4em; }
+</style>
+</head>
+<body>
+<h1>CJK Double-Click 测试</h1>
+<p>在每个用例上双击，应得到 <b>预期</b> 的选择。</p>
+
+<div class="case">
+  <b>1. 纯中文，无标点</b><br>
+  <p>今天天气很好我们一起去公园吧</p>
+  预期：双击任意字 → 全选这段
+</div>
+
+<div class="case">
+  <b>2. 半角分隔的句子</b><br>
+  <p>今天天气很好，我们一起去公园吧。</p>
+  预期：双击 <code>好</code> → <code>今天天气很好</code>；双击 <code>园</code> → <code>我们一起去公园吧</code>
+</div>
+
+<div class="case">
+  <b>3. 中英混排</b><br>
+  <p>Today 今天 is 晴天 weather</p>
+  预期：双击 <code>今</code> → <code>今天</code>；双击 <code>quick</code> 之类英文 → 单词级（脚本不干预）
+</div>
+
+<div class="case">
+  <b>4. 数字夹中文</b><br>
+  <p>价格是 100 元整</p>
+  预期：双击 <code>元</code> → <code>元整</code>；双击 <code>100</code> → 数字（脚本不干预）
+</div>
+
+<div class="case">
+  <b>5. 纯英文，不应触发</b><br>
+  <p>The quick brown fox jumps over the lazy dog</p>
+  预期：双击 → 单词级原生行为
+</div>
+
+<div class="case">
+  <b>6. input：原生行为</b><br>
+  <input value="今天天气很好"><br>
+  预期：双击 input 内任意字 → 浏览器原生选择（脚本不干预）
+</div>
+
+<div class="case">
+  <b>7. 跨 span</b><br>
+  <p><span>今天</span><span style="color:#a00">天气</span><span>很好</span></p>
+  预期：双击任意字 → <code>今天天气很好</code>（跨三个 span 合并）
+</div>
+
+<div class="case">
+  <b>8. 嵌套 block 应阻断</b><br>
+  <div>今天<div style="display:block;color:#a00">新段落</div>剩余</div>
+  预期：双击 <code>余</code> → <code>剩余</code>（不应吸进"新段落"）
+</div>
+
+<div class="case">
+  <b>9. contenteditable</b><br>
+  <p contenteditable="true">今天天气很好，可编辑区域也要工作。</p>
+  预期：双击 <code>好</code> → <code>今天天气很好</code>
+</div>
+
+<div class="case">
+  <b>10. 标点夹在中间</b><br>
+  <p>第一段·第二段</p>
+  预期：双击 <code>第</code>（任一）→ 只选所在的"第一段"或"第二段"（<code>·</code> 是非汉字，作边界）
+</div>
+</body>
+</html>
