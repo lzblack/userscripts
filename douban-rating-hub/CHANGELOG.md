@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-05-22
+
+### Added
+- **Trakt 数据源**：电影和剧集页新增 Trakt 评分（10 分制 + 投票人数）。Trakt 用户基数 ~2-3M，偏追剧型核心影视迷，给现有 IMDB / Letterboxd / TMDB / RT / Metacritic 之外多一个社区视角，**尤其补足 TV 评分**（Letterboxd 不收 TV）。匹配机制：豆瓣 #info 有 IMDB ID 时走 `/search/imdb/{imdb_id}` 直链（100% 命中、无 fuzzy 匹配）；无 IMDB ID 退回 `search/movie,show?query=` 标题搜索（仅当标题含拉丁字母）。
+- **BYOK 配置**：跟 TMDB Key 同模式——用户需到 https://trakt.tv/oauth/applications/new 自行注册一个 app 拿到 Client ID，填到「⚙ 评分汇设置」面板的 "Trakt Client ID" 字段。**不需要 OAuth、不暴露任何个人信息**——Client ID 只是 API 通行证。留空则 Trakt 行不显示（status: disabled）。
+
+### Fixed
+- **TMDB 在剧集页"未收录"**（双重 bug，皆已修）：
+  1. **主路径 `/find/{imdb_id}` 忽略 `tv_episode_results` / `tv_season_results`**——豆瓣 TV 季页常存 episode-specific IMDB ID（如 [35758798 亢奋 第三季](https://movie.douban.com/subject/35758798/) 的 tt17719220 = Euphoria S3E1）。TMDB /find 在 `tv_episode_results` 里返回该 episode，但旧代码只看 `movie_results` 和 `tv_results` 两个字段 → noMatch。修复：识别 episode/season，提取 `show_id` 二次 fetch `/tv/{show_id}` 拿 show 级评分（跟 Trakt 行为一致；避免显示单集分误导）。
+  2. **Fallback 标题搜索用中文 + 季号 + 仅查 movie**——`meta.title`（如"亢奋 第三季"）直接送 `/search/movie` 端点；既不剥季号也不查电视剧。改为 `stripSeason(meta.originalTitle || meta.title)` + `/search/multi` 同时覆盖 movie + tv。
+  
+  整体效果：豆瓣"亢奋 第三季"现在显示 TMDB 8.3/10（11K+ votes，整剧综合分），之前必败。
+- **Trakt 点击链接 404（剧集页）**：豆瓣 TV 季页的 IMDB ID 通常是某一集的 ID（如 tt17719220 = Euphoria S3E1）→ Trakt 返回 `type: 'episode'`。旧代码错误地把响应里的父剧集 slug 拼到 `/movies/` 路径下（`/movies/euphoria-2019`），必然 404。现在按 type 正确分发：episode/season/show 都走 `/shows/{slug}` + show 级评分（与 IMDB 在 TV 上行为一致）；movie 走 `/movies/{slug}`。豆瓣页是季级时仍显示整剧综合分（季级评分需 P2b 季级映射时再加）。
+
+### Changed
+- **评分行折叠门槛改为动态判断**：之前固定阈值 "总通道数 > 7 才折叠"，导致 8 通道（含 Trakt 后的典型电影页）折叠 2 行 + 加 1 个 "展开" toggle = 净省 0 行。改为按净省算——隐藏 ≥ 2 条才折叠（净省 ≥ 1 行才有意义）。同时把 Trakt 加入默认可见通道集合（非动画电影/剧集页），避免 Trakt 用户每次都要展开。
+
+### Cache invalidation
+- bump source version：`trakt` 1→2（修复 URL bug 必须重拉旧缓存）、`tmdb` 1→2（让 TMDB fallback 修复立即生效，不必等老缓存过期）。
+
 ## [1.1.5] - 2026-05-22
 
 ### Added
