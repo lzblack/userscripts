@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.3
+// @version      1.1.4
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -295,6 +295,13 @@
           creator = next.textContent.trim();
         } else if (creatorSpan.nextSibling) {
           creator = creatorSpan.nextSibling.textContent.trim();
+        }
+        // Sanitize: 取前导单一脚本字符串（前导 CJK 或前导 Latin），
+        // 防御浏览器侧 DOM 注入（翻译扩展、注解插件等）污染作者名，
+        // 例如把 "郑执" 变成 "郑gums"，进而污染 Amazon/Goodreads 等的搜索查询
+        if (creator) {
+          const m = creator.match(/^([一-鿿]+|[A-Za-z][A-Za-z\s.'\-]*)/);
+          if (m) creator = m[1].trim();
         }
       }
     }
@@ -832,6 +839,26 @@
         location.reload();
       }
     });
+    GM_registerMenuCommand('🗑 清除当前条目评分缓存', function () {
+      const m = location.pathname.match(/\/(?:subject|game|location\/drama|podcast)\/(\d+)/);
+      if (!m) {
+        alert('未识别到豆瓣条目 ID。请在条目页（如 /subject/12345/）执行。');
+        return;
+      }
+      const doubanId = m[1];
+      const prefix = CACHE_PREFIX + doubanId + ':';
+      const keys = deps.storage.listKeys();
+      let removed = 0;
+      keys.forEach(function (key) {
+        if (key.indexOf(prefix) === 0) {
+          deps.storage.remove(key);
+          removed++;
+        }
+      });
+      if (confirm('已清除 ' + removed + ' 条评分缓存（条目 ' + doubanId + '）。立即刷新页面以重新拉取？')) {
+        location.reload();
+      }
+    });
   }
 
   // ============================================================
@@ -854,6 +881,8 @@
       '.rating-hub-label.no-link:hover { color: #37a; background-color: transparent; }',
       '.rating-hub-label:focus-visible, .rating-hub-status a:focus-visible, .rh-config-button:focus-visible, .rh-config-input:focus-visible, .rh-config-checkbox:focus-visible, .rh-config-disclosure-summary:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(55, 119, 170, 0.28); background-color: rgba(55, 119, 170, 0.08); }',
       '.rating-hub-count { color: #777; justify-self: start; margin-left: 0; font-variant-numeric: tabular-nums; min-width: 0; white-space: nowrap; line-height: 1; }',
+      '.rating-hub-row[data-confidence="fuzzy"] .rating-hub-score { opacity: 0.72; }',
+      '.rating-hub-fuzzy-mark { color: #b39a6c; font-weight: 400; margin-left: 3px; font-size: 11px; cursor: help; line-height: 1; user-select: none; }',
       '.rating-hub-status { color: #666; grid-column: 2 / span 2; min-width: 0; white-space: nowrap; line-height: 1.2; }',
       '.rating-hub-status a { color: #37a; text-decoration: none; }',
       '.rating-hub-status a:hover { text-decoration: underline; }',
@@ -1013,6 +1042,11 @@
 
     const status = result.status;
     row.setAttribute('data-status', status || 'error');
+    if (result.matchConfidence) {
+      row.setAttribute('data-confidence', result.matchConfidence);
+    } else {
+      row.removeAttribute('data-confidence');
+    }
 
     if (status === 'success') {
       // Label → 可点击链接
@@ -1044,6 +1078,14 @@
         mainEl.className = 'rating-hub-score-main';
         mainEl.textContent = scoreText;
         scoreEl.appendChild(mainEl);
+      }
+      if (result.matchConfidence === 'fuzzy') {
+        const mark = document.createElement('span');
+        mark.className = 'rating-hub-fuzzy-mark';
+        mark.textContent = '~';
+        mark.title = '此匹配为模糊匹配（按标题搜索），分数可能对应错的作品';
+        mark.setAttribute('aria-label', '模糊匹配');
+        scoreEl.appendChild(mark);
       }
       row.appendChild(scoreEl);
 
@@ -1216,7 +1258,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 2,
+    key: 'rottentomatoes', label: '烂番茄', version: 3,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -1227,7 +1269,8 @@
         const titleRaw = meta.originalTitle || meta.title || '';
         const titleForSearch = stripSeason(titleRaw);
         const searchUrl = 'https://www.rottentomatoes.com/search?search=' + encodeURIComponent(titleForSearch);
-        const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+        // RT 无 IMDB ID 查询能力，所有匹配本质都是文本搜索，统一标 fuzzy
+        const matchConfidence = 'fuzzy';
 
         function noMatchBoth() {
           resolve({
@@ -1296,10 +1339,24 @@
           const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
           const queryNorm = normalize(titleForSearch);
           let bestLink = null;
+          // 第一阶段：normalize 后严格相等（最高置信度）
           for (let i = 0; i < Math.min(allResults.length, 30); i++) {
             const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
             if (!nameEl) continue;
             if (normalize(nameEl.textContent) === queryNorm) { bestLink = nameEl; break; }
+          }
+          // 第二阶段：子串包含兜底（query 至少 4 字符避免短标题误配如 "Up" / "It"）
+          // 覆盖 "The Avengers" → "Marvel's The Avengers (2012)" / "The Avengers (2012)" 等 RT 加前后缀的常见情况
+          if (!bestLink && queryNorm.length >= 4) {
+            for (let i = 0; i < Math.min(allResults.length, 30); i++) {
+              const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
+              if (!nameEl) continue;
+              const nameNorm = normalize(nameEl.textContent);
+              if (!nameNorm) continue;
+              if (nameNorm.includes(queryNorm) || queryNorm.includes(nameNorm)) {
+                bestLink = nameEl; break;
+              }
+            }
           }
           if (!bestLink) {
             // 没有匹配的结果
@@ -1374,7 +1431,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 4,
+    key: 'metacritic', label: 'Metacritic', version: 5,
     types: ['movie', 'game'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1382,7 +1439,8 @@
         const titleRaw = meta.originalTitle || meta.title || '';
         const titleForSlug = stripSeason(titleRaw);
         const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
-        const matchConfidence = meta.originalTitle ? 'high' : 'fuzzy';
+        // MC 无 IMDB ID 查询能力，所有匹配本质都是文本搜索，统一标 fuzzy
+        const matchConfidence = 'fuzzy';
 
         // If title contains no ASCII letters it's CJK-only — Metacritic has no match
         if (!titleForSlug || !/[a-zA-Z]/.test(titleForSlug)) {
@@ -1439,7 +1497,7 @@
                     displayValue: Number(score) + '/100',
                     count: reviewCount, countText: reviewCount ? reviewCount.toLocaleString() : null,
                     url: 'https://www.metacritic.com/' + mcUrlType + '/' + finderSlug + '/',
-                    matchedBy: 'finder_search', matchConfidence: 'high',
+                    matchedBy: 'finder_search', matchConfidence: 'fuzzy',
                     externalId: finderSlug,
                   },
                 });
@@ -1514,19 +1572,12 @@
 
   // --- Letterboxd ---
   sources.push({
-    key: 'letterboxd', label: 'Letterboxd', version: 1,
+    key: 'letterboxd', label: 'Letterboxd', version: 2,
     types: ['movie'], requiredConfig: null,
     channels: [{ channelKey: 'letterboxd', label: 'Letterboxd', icon: 'https://letterboxd.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
         const searchUrl = 'https://letterboxd.com/search/' + encodeURIComponent(stripSeason(meta.originalTitle || meta.title || '')) + '/';
-        if (!meta.imdbId) {
-          resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
-          return;
-        }
-
-        const csiUrl = 'https://letterboxd.com/csi/film/imdb/' + meta.imdbId + '/ratings-summary/';
-        const fallbackUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
 
         function parseFromPage(html, pageUrl) {
           const doc = deps.parseHTML(html);
@@ -1558,7 +1609,7 @@
           return null;
         }
 
-        function buildSuccess(score, count, filmUrl) {
+        function buildSuccess(score, count, filmUrl, matchedBy, confidence) {
           return {
             letterboxd: {
               channelKey: 'letterboxd',
@@ -1569,14 +1620,15 @@
               count: count || null,
               countText: count ? count.toLocaleString() : null,
               url: filmUrl,
-              matchedBy: 'imdb_id',
-              matchConfidence: 'exact',
+              matchedBy: matchedBy,
+              matchConfidence: confidence,
               externalId: filmUrl,
             },
           };
         }
 
-        // THIRD FALLBACK: search by title
+        // FALLBACK: 按 originalTitle 搜 letterboxd.com/search/films/
+        // 用于：豆瓣无 IMDB ID 的条目，或 /imdb/{id}/ 主路径失败
         function tryTitleSearch() {
           // Letterboxd 只有英文内容，用 originalTitle 去掉季数
           const searchTitle = stripSeason(meta.originalTitle || meta.title || '');
@@ -1603,7 +1655,7 @@
               const finalUrl = filmResp.finalUrl || filmUrl;
               const parsed = parseFromPage(filmResp.responseText, finalUrl);
               if (parsed && !isNaN(parsed.score)) {
-                resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+                resolve(buildSuccess(parsed.score, parsed.count, parsed.url, 'title', 'fuzzy'));
               } else {
                 resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
               }
@@ -1615,49 +1667,30 @@
           });
         }
 
-        // SECOND FALLBACK: fetch /imdb/{id}/ page directly
-        function tryImdbPage() {
-          deps.request(fallbackUrl).then(function (pageResp) {
-            if (pageResp.status === 403) {
+        // PRIMARY: 有 IMDB ID → /imdb/{id}/ 直链（302 → 详情页）
+        // 注：原 CSI 端点 /csi/film/imdb/{id}/ratings-summary/ 已废弃（返 404），
+        // 之前是 primary，现在删除——直接走 /imdb/{id}/ 省一次失败请求。
+        if (meta.imdbId) {
+          const imdbPageUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
+          deps.request(imdbPageUrl).then(function (pageResp) {
+            if (pageResp.status === 403 || pageResp.status === 404) {
               tryTitleSearch();
               return;
             }
-            const finalUrl = pageResp.finalUrl || fallbackUrl;
+            const finalUrl = pageResp.finalUrl || imdbPageUrl;
             const parsed = parseFromPage(pageResp.responseText, finalUrl);
             if (parsed && !isNaN(parsed.score)) {
-              resolve(buildSuccess(parsed.score, parsed.count, parsed.url));
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url, 'imdb_id', 'exact'));
             } else {
               tryTitleSearch();
             }
           }).catch(function () {
             tryTitleSearch();
           });
+        } else {
+          // 无 IMDB ID：直接走 title search（不再一刀切 no_match）
+          tryTitleSearch();
         }
-
-        // PRIMARY: CSI ratings-summary endpoint
-        deps.request(csiUrl).then(function (resp) {
-          if (resp.status >= 200 && resp.status < 300) {
-            const html = resp.responseText;
-            // Extract weighted average and count
-            const ratingMatch = html.match(/Weighted average of ([\d.]+) based on ([\d,]+)/);
-            if (ratingMatch) {
-              const score = parseFloat(ratingMatch[1]);
-              const count = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
-              // Try to extract film URL from CSI response
-              const filmUrlMatch = html.match(/href="(\/film\/[^"]+)"/);
-              const filmUrl = filmUrlMatch
-                ? 'https://letterboxd.com' + filmUrlMatch[1]
-                : fallbackUrl;
-              resolve(buildSuccess(score, count, filmUrl));
-              return;
-            }
-          }
-          // CSI returned non-success or no rating data — try IMDB page
-          tryImdbPage();
-        }).catch(function () {
-          // CSI request failed entirely — try IMDB page
-          tryImdbPage();
-        });
       });
     },
   });
@@ -1875,7 +1908,7 @@
 
   // --- Goodreads ---
   sources.push({
-    key: 'goodreads', label: 'Goodreads', version: 1,
+    key: 'goodreads', label: 'Goodreads', version: 2,
     types: ['book'], requiredConfig: null,
     channels: [{ channelKey: 'goodreads', label: 'Goodreads', icon: 'https://www.goodreads.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -1935,12 +1968,16 @@
           const isIsbn = queryIndex === 0 && !!meta.isbn;
           const matchedBy = isIsbn ? 'isbn' : 'title';
           const confidence = isIsbn ? 'exact' : 'fuzzy';
-          const searchUrl = 'https://www.goodreads.com/search?q=' + encodeURIComponent(query);
+          // ISBN 走 /book/isbn/{isbn} 直链（302 → 详情页），跳过被反爬阻断的 /search?q=
+          // 非 ISBN 仍走 /search?q=，保留原 fallback 行为（即便目前返 202，未来若恢复也能用）
+          const url = isIsbn
+            ? 'https://www.goodreads.com/book/isbn/' + encodeURIComponent(query)
+            : 'https://www.goodreads.com/search?q=' + encodeURIComponent(query);
 
-          deps.request(searchUrl).then(function (resp) {
+          deps.request(url).then(function (resp) {
             if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
-            const finalUrl = resp.finalUrl || searchUrl;
-            // If search redirected directly to a book detail page
+            const finalUrl = resp.finalUrl || url;
+            // ISBN 直链 302 后或 search 自动跳转到详情页 → 直接解析
             if (detailPathRe.test(finalUrl)) {
               const doc = deps.parseHTML(resp.responseText);
               const parsed = parseDetail(doc, finalUrl);
@@ -1948,7 +1985,7 @@
               else { tryQuery(queryIndex + 1); }
               return;
             }
-            // Search results page — find first bookTitle link
+            // 仍在 search 结果页 — 找 a.bookTitle 链接
             const doc = deps.parseHTML(resp.responseText);
             const linkEl = doc.querySelector('a.bookTitle');
             if (!linkEl) { tryQuery(queryIndex + 1); return; }
@@ -1971,20 +2008,68 @@
 
   // --- Amazon ---
   sources.push({
-    key: 'amazon', label: 'Amazon', version: 1,
+    key: 'amazon', label: 'Amazon', version: 2,
     types: ['book'], requiredConfig: null,
     channels: [{ channelKey: 'amazon', label: 'Amazon', icon: 'https://www.amazon.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        // Query cascade: ISBN → originalTitle+creator → title+creator
         const creator = meta.creator || '';
-        const queries = [];
-        if (meta.isbn) queries.push(meta.isbn);
-        if (meta.originalTitle && meta.originalTitle !== meta.title) {
-          queries.push(creator ? meta.originalTitle + ' ' + creator : meta.originalTitle);
+        const titleForCheck = meta.originalTitle || meta.title || '';
+
+        // CJK-only 且无 ISBN 的书直接跳过：Amazon US 几乎不收录纯中文书，
+        // 避免无谓搜索 + 不把中文书名留在 Amazon 搜索历史/服务端 access log
+        if (!meta.isbn && !/[a-zA-Z]/.test(titleForCheck)) {
+          resolve({ amazon: { channelKey: 'amazon', status: 'no_match', url: 'https://www.amazon.com/' } });
+          return;
         }
-        if (meta.title) {
-          queries.push(creator ? meta.title + ' ' + creator : meta.title);
+
+        // ISBN-13 → ISBN-10 (978 前缀书，绝大多数)
+        // 关键作用：让 ISBN 类查询能走 /dp/{ISBN-10} 直链，完全绕开 /s?k= 搜索
+        function isbn13ToIsbn10(isbn13) {
+          if (!isbn13 || isbn13.length !== 13 || !isbn13.startsWith('978')) return null;
+          const core = isbn13.substring(3, 12);
+          let sum = 0;
+          for (let i = 0; i < 9; i++) {
+            const d = parseInt(core[i], 10);
+            if (isNaN(d)) return null;
+            sum += d * (i + 1);
+          }
+          const check = sum % 11;
+          return core + (check === 10 ? 'X' : String(check));
+        }
+
+        // Query cascade: 每项 { kind: 'dp' | 'search', value, isIsbn }
+        const queries = [];
+        // 1. 有 ISBN → 优先走 /dp/{ASIN} 直链（不发任何搜索查询）
+        if (meta.isbn) {
+          const isbn = meta.isbn;
+          if (isbn.length === 10) {
+            queries.push({ kind: 'dp', value: isbn, isIsbn: true });
+          } else if (isbn.length === 13) {
+            const isbn10 = isbn13ToIsbn10(isbn);
+            if (isbn10) {
+              queries.push({ kind: 'dp', value: isbn10, isIsbn: true });
+            } else {
+              // 979 前缀 ISBN-13 无 ISBN-10 对应，退回搜索（仍按 ISBN 搜，比标题安全）
+              queries.push({ kind: 'search', value: isbn, isIsbn: true });
+            }
+          }
+        }
+        // 2. originalTitle + creator（含拉丁字母时才搜，CJK-only 上面已 early return）
+        if (meta.originalTitle && meta.originalTitle !== meta.title && /[a-zA-Z]/.test(meta.originalTitle)) {
+          queries.push({
+            kind: 'search',
+            value: creator ? meta.originalTitle + ' ' + creator : meta.originalTitle,
+            isIsbn: false,
+          });
+        }
+        // 3. title + creator
+        if (meta.title && /[a-zA-Z]/.test(meta.title)) {
+          queries.push({
+            kind: 'search',
+            value: creator ? meta.title + ' ' + creator : meta.title,
+            isIsbn: false,
+          });
         }
         if (!queries.length) {
           resolve({ amazon: { channelKey: 'amazon', status: 'no_match', url: 'https://www.amazon.com/' } });
@@ -1994,7 +2079,10 @@
         const dpPathRe = /amazon\.com(\/[^/]+)?\/dp\//;
 
         function noMatch() {
-          const url = 'https://www.amazon.com/s?k=' + encodeURIComponent(queries[0]);
+          const first = queries[0];
+          const url = first.kind === 'dp'
+            ? 'https://www.amazon.com/dp/' + first.value
+            : 'https://www.amazon.com/s?k=' + encodeURIComponent(first.value);
           resolve({ amazon: { channelKey: 'amazon', status: 'no_match', url: url } });
         }
 
@@ -2057,12 +2145,19 @@
 
         function tryQuery(queryIndex) {
           if (queryIndex >= queries.length) { noMatch(); return; }
-          const query = queries[queryIndex];
-          const isIsbn = queryIndex === 0 && !!meta.isbn;
-          const matchedBy = isIsbn ? 'isbn' : 'title';
-          const confidence = isIsbn ? 'exact' : 'fuzzy';
-          const searchUrl = 'https://www.amazon.com/s?k=' + encodeURIComponent(query);
+          const q = queries[queryIndex];
+          const matchedBy = q.isIsbn ? 'isbn' : 'title';
+          const confidence = q.isIsbn ? 'exact' : 'fuzzy';
 
+          // /dp/ 直链路径：单次请求拿详情页，零搜索查询泄漏
+          if (q.kind === 'dp') {
+            const dpUrl = 'https://www.amazon.com/dp/' + q.value;
+            fetchDetail(dpUrl, matchedBy, confidence, function () { tryQuery(queryIndex + 1); });
+            return;
+          }
+
+          // /s?k= 搜索路径
+          const searchUrl = 'https://www.amazon.com/s?k=' + encodeURIComponent(q.value);
           deps.request(searchUrl, { headers: { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } })
             .then(function (resp) {
               if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
@@ -2247,7 +2342,7 @@
   sources.push({
     key: 'steam',
     label: 'Steam',
-    version: 1,
+    version: 2,
     types: ['game'],
     requiredConfig: null,
     channels: [{ channelKey: 'steam', label: 'Steam', icon: 'https://store.steampowered.com/favicon.ico' }],
@@ -2314,7 +2409,7 @@
                 countText: total.toLocaleString(),
                 url: storeUrl,
                 matchedBy: normalize(bestItem.name) === queryNorm ? 'title' : 'search_first',
-                matchConfidence: normalize(bestItem.name) === queryNorm ? 'high' : 'fuzzy',
+                matchConfidence: 'fuzzy',
                 externalId: String(appId),
               },
             });
