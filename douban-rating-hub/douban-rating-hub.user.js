@@ -2,8 +2,8 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.5
-// @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台；在 title 上方显示外部权威榜单胶囊
+// @version      1.1.6
+// @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads、Trakt 等 17 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
 // @match        https://music.douban.com/subject/*
@@ -30,6 +30,7 @@
 // @connect      podcasts.apple.com
 // @connect      xyzrank.eddiehe.top
 // @connect      rank.douban.zhili.dev
+// @connect      api.trakt.tv
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -519,6 +520,7 @@
 
   const DEFAULT_CONFIG = {
     tmdbApiKey: '',
+    traktClientId: '',
     enabledSources: {},
   };
 
@@ -690,6 +692,36 @@
     tmdbSection.appendChild(tmdbInput);
     panel.appendChild(tmdbSection);
 
+    // Trakt Client ID 输入框（电影/剧集页可选）
+    const traktSection = document.createElement('section');
+    traktSection.className = 'rh-config-section';
+
+    const traktHeading = document.createElement('h4');
+    traktHeading.className = 'rh-config-section-title';
+    traktHeading.textContent = 'Trakt Client ID（可选）';
+    traktSection.appendChild(traktHeading);
+
+    const traktHelp = document.createElement('p');
+    traktHelp.id = 'rh-config-trakt-help';
+    traktHelp.className = 'rh-config-section-desc';
+    traktHelp.textContent = '只在电影/剧集页用于显示 Trakt 评分。需在 trakt.tv/oauth/applications/new 注册一个 app 获取 Client ID（无需 OAuth、不暴露个人信息）。留空则不显示这一行。';
+    traktSection.appendChild(traktHelp);
+
+    const traktLabel = document.createElement('label');
+    traktLabel.className = 'rh-config-field-label';
+    traktLabel.textContent = 'Trakt Client ID';
+    const traktInput = document.createElement('input');
+    traktInput.type = 'text';
+    traktInput.autocomplete = 'off';
+    traktInput.spellcheck = false;
+    traktInput.value = config.traktClientId || '';
+    traktInput.placeholder = '留空即可';
+    traktInput.className = 'rh-config-input';
+    traktInput.setAttribute('aria-describedby', 'rh-config-trakt-help');
+    traktSection.appendChild(traktLabel);
+    traktSection.appendChild(traktInput);
+    panel.appendChild(traktSection);
+
     // 数据来源启用/禁用
     if (sources && sources.length > 0) {
       const currentLabelMap = {
@@ -780,6 +812,7 @@
     saveBtn.addEventListener('click', function () {
       const newConfig = readConfig();
       newConfig.tmdbApiKey = tmdbInput.value.trim();
+      newConfig.traktClientId = traktInput.value.trim();
       if (panel._checkboxes) {
         Object.keys(panel._checkboxes).forEach(function (k) {
           newConfig.enabledSources[k] = panel._checkboxes[k].checked;
@@ -1039,18 +1072,23 @@
   }
 
   function getCollapsedChannelKeys(channels, meta) {
-    if (!channels || channels.length <= 7) return [];
+    if (!channels) return [];
     if (meta.type !== 'movie' && meta.type !== 'drama') return [];
 
     const isAnime = meta.type === 'movie' && meta.genres && meta.genres.indexOf('动画') !== -1;
     const visibleKeys = isAnime
       ? ['imdb', 'rt_critics', 'rt_audience', 'bangumi', 'mal', 'neodb']
-      : ['imdb', 'rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'neodb'];
+      : ['imdb', 'rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'trakt', 'neodb'];
     const visibleSet = new Set(visibleKeys);
 
-    return channels
+    const hidden = channels
       .filter(function (ch) { return !visibleSet.has(ch.channelKey); })
       .map(function (ch) { return ch.channelKey; });
+
+    // 只在隐藏 ≥ 2 条时才折叠：每折叠一组多一个 "展开更多" toggle 行，
+    // 隐藏 1 条 = 净省 0 行（无意义）；隐藏 2 条 = 净省 1 行；3 条 = 净省 2 行。
+    if (hidden.length < 2) return [];
+    return hidden;
   }
 
   function createSlots(channels, meta) {
@@ -1814,7 +1852,7 @@
 
   // --- TMDB ---
   sources.push({
-    key: 'tmdb', label: 'TMDB', version: 1,
+    key: 'tmdb', label: 'TMDB', version: 2,
     types: ['movie'],
     requiredConfig: ['tmdbApiKey'],
     channels: [{ channelKey: 'tmdb', label: 'TMDB', icon: 'https://www.themoviedb.org/favicon.ico' }],
@@ -1882,19 +1920,186 @@
           const findUrl = 'https://api.themoviedb.org/3/find/' + meta.imdbId +
             '?api_key=' + encodeURIComponent(apiKey) + '&external_source=imdb_id';
           deps.request(findUrl).then(function (resp) {
-            handleResp(resp, function (data) {
-              return (data.movie_results && data.movie_results[0]) || (data.tv_results && data.tv_results[0]);
-            }, 'imdb_id', 'exact');
+            if (resp.status === 401 || resp.status === 403) {
+              resolve({ tmdb: { channelKey: 'tmdb', status: 'error', url: searchUrl } });
+              return;
+            }
+            if (resp.status === 429) {
+              resolve({ tmdb: { channelKey: 'tmdb', status: 'rate_limited', url: searchUrl } });
+              return;
+            }
+            if (resp.status < 200 || resp.status >= 300) { noMatch(); return; }
+            try {
+              const data = JSON.parse(resp.responseText);
+              const movie = data.movie_results && data.movie_results[0];
+              if (movie) { buildSuccess(movie, 'imdb_id', 'exact'); return; }
+              const tv = data.tv_results && data.tv_results[0];
+              if (tv) { buildSuccess(tv, 'imdb_id', 'exact'); return; }
+              // Episode 或 Season —— 豆瓣 TV 季页常存 episode/season-specific IMDB ID
+              // （如 tt17719220 = Euphoria S3E1）。这里 /find 返回 tv_episode_results / tv_season_results，
+              // episode 单集评分（vote_count 几十）跟整剧综合分（数千+）差距悬殊且误导。
+              // 解法：提取 show_id → 二次 fetch /tv/{show_id} 拿 show 级评分（与 Trakt 行为一致）。
+              const epOrSeason = (data.tv_episode_results && data.tv_episode_results[0])
+                || (data.tv_season_results && data.tv_season_results[0]);
+              if (epOrSeason && epOrSeason.show_id) {
+                const showUrl = 'https://api.themoviedb.org/3/tv/' + epOrSeason.show_id +
+                  '?api_key=' + encodeURIComponent(apiKey);
+                deps.request(showUrl).then(function (showResp) {
+                  if (showResp.status < 200 || showResp.status >= 300) { noMatch(); return; }
+                  try {
+                    const showData = JSON.parse(showResp.responseText);
+                    showData.media_type = 'tv';  // 显式标 tv 让 buildSuccess 拼出 /tv/{id} URL
+                    buildSuccess(showData, 'imdb_id', 'exact');
+                  } catch (e) { noMatch(); }
+                }).catch(function () { noMatch(); });
+                return;
+              }
+              noMatch();
+            } catch (e) {
+              noMatch();
+            }
           }).catch(function () { noMatch(); });
         } else {
           // Fallback to title search
+          // 修复：(1) 用 originalTitle 优先，剥掉"第X季"等季号后缀，避免拿中文+季号去搜 TMDB；
+          //       (2) 用 /search/multi 同时覆盖电影 + 电视剧（之前只搜 /search/movie，剧集必败）。
+          const titleForSearch = stripSeason(meta.originalTitle || meta.title || '');
+          if (!titleForSearch) { noMatch(); return; }
           const year = meta.year ? '&year=' + encodeURIComponent(meta.year) : '';
-          const queryUrl = 'https://api.themoviedb.org/3/search/movie?api_key=' +
-            encodeURIComponent(apiKey) + '&query=' + encodeURIComponent(meta.title || '') + year;
+          const queryUrl = 'https://api.themoviedb.org/3/search/multi?api_key=' +
+            encodeURIComponent(apiKey) + '&query=' + encodeURIComponent(titleForSearch) + year;
           deps.request(queryUrl).then(function (resp) {
             handleResp(resp, function (data) {
-              return data.results && data.results[0];
+              if (!data.results) return null;
+              // 跳过 person 结果，只取 movie/tv 第一条
+              for (let i = 0; i < data.results.length; i++) {
+                const r = data.results[i];
+                if (r.media_type === 'movie' || r.media_type === 'tv') return r;
+              }
+              return null;
             }, 'title', 'fuzzy');
+          }).catch(function () { noMatch(); });
+        }
+      });
+    },
+  });
+
+  // --- Trakt ---
+  // 公开评分端点只需 Client ID（HTTP 头 trakt-api-key），无 OAuth、无用户信息暴露。
+  // 用户需自行去 trakt.tv/oauth/applications/new 注册一个 app 拿 Client ID，跟 TMDB Key 同模式。
+  sources.push({
+    key: 'trakt', label: 'Trakt', version: 2,
+    types: ['movie'],  // 'movie' 覆盖豆瓣电影 + 电视剧条目页（豆瓣类型层不区分）
+    requiredConfig: ['traktClientId'],
+    channels: [{ channelKey: 'trakt', label: 'Trakt', icon: 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' }],
+    fetch: function (meta, deps) {
+      return new Promise(function (resolve) {
+        const config = readConfig();
+        const clientId = config.traktClientId;
+        const headers = {
+          'Content-Type': 'application/json',
+          'trakt-api-version': '2',
+          'trakt-api-key': clientId,
+        };
+        const fallbackUrl = 'https://trakt.tv/search?query=' + encodeURIComponent(meta.title || '');
+
+        function noMatch() {
+          resolve({ trakt: { channelKey: 'trakt', status: 'no_match', url: fallbackUrl } });
+        }
+
+        // 从 Trakt search response 决定用哪个对象的评分 + 公开 URL。
+        // Trakt /search/imdb 可返回 type: 'movie' | 'show' | 'season' | 'episode'。
+        //
+        // 关键发现：豆瓣 TV 季/集页面（如"亢奋第三季"）的 IMDB ID 通常指向某一集
+        // （如 tt17719220 = Euphoria S3E1 "Andale"），Trakt 据此返回 type='episode'。
+        // 显示单集评分作为"整季评分"会误导；豆瓣"剧集"页应该展示 show 级别评分（跟 IMDB
+        // 在 TV 上的行为一致：show-level rating + show URL）。
+        // 所以 season/episode 类型 → 用 parent show 的 rating 和 URL（show 在响应里同时存在）。
+        function pickRatingAndUrl(first) {
+          const type = first.type;
+          if (type === 'movie' && first.movie) {
+            const slug = first.movie.ids && first.movie.ids.slug;
+            return {
+              ratingItem: first.movie,
+              url: slug ? 'https://trakt.tv/movies/' + slug : null,
+            };
+          }
+          // show / season / episode 一律走 show 级
+          if (first.show) {
+            const slug = first.show.ids && first.show.ids.slug;
+            return {
+              ratingItem: first.show,
+              url: slug ? 'https://trakt.tv/shows/' + slug : null,
+            };
+          }
+          return null;
+        }
+
+        function buildSuccess(ratingItem, publicUrl, matchedBy, matchConfidence) {
+          const score = parseFloat(ratingItem.rating);
+          const count = parseInt(ratingItem.votes, 10) || 0;
+          const externalId = (ratingItem.ids && (ratingItem.ids.slug || String(ratingItem.ids.trakt))) || null;
+          if (isNaN(score) || score === 0) {
+            resolve({ trakt: { channelKey: 'trakt', status: 'no_rating', url: publicUrl } });
+            return;
+          }
+          resolve({
+            trakt: {
+              channelKey: 'trakt',
+              status: 'success',
+              score: score,
+              scoreMax: 10,
+              displayValue: score.toFixed(1) + '/10',
+              count: count,
+              countText: count.toLocaleString(),
+              url: publicUrl,
+              matchedBy: matchedBy,
+              matchConfidence: matchConfidence,
+              externalId: externalId,
+            },
+          });
+        }
+
+        function handleResp(resp, matchedBy, matchConfidence) {
+          if (resp.status === 401 || resp.status === 403) {
+            resolve({ trakt: { channelKey: 'trakt', status: 'error', url: fallbackUrl } });
+            return;
+          }
+          if (resp.status === 429) {
+            resolve({ trakt: { channelKey: 'trakt', status: 'rate_limited', url: fallbackUrl } });
+            return;
+          }
+          if (resp.status < 200 || resp.status >= 300) {
+            noMatch();
+            return;
+          }
+          try {
+            const data = JSON.parse(resp.responseText);
+            if (!Array.isArray(data) || data.length === 0) { noMatch(); return; }
+            const first = data[0];
+            const picked = pickRatingAndUrl(first);
+            if (!picked || !picked.ratingItem) { noMatch(); return; }
+            buildSuccess(picked.ratingItem, picked.url || fallbackUrl, matchedBy, matchConfidence);
+          } catch (e) {
+            noMatch();
+          }
+        }
+
+        if (meta.imdbId) {
+          // 优先 IMDB ID 直链 —— 100% 命中（如果该作品在 Trakt 上），无 fuzzy
+          const url = 'https://api.trakt.tv/search/imdb/' + encodeURIComponent(meta.imdbId) + '?extended=full';
+          deps.request(url, { headers: headers }).then(function (resp) {
+            handleResp(resp, 'imdb_id', 'exact');
+          }).catch(function () { noMatch(); });
+        } else {
+          // 无 IMDB ID 时退回标题搜索，仅当含拉丁字母（Trakt 几乎不收华语片）
+          const titleForSearch = meta.originalTitle || meta.title || '';
+          if (!/[a-zA-Z]/.test(titleForSearch)) { noMatch(); return; }
+          const yearParam = meta.year ? '&years=' + encodeURIComponent(meta.year) : '';
+          const url = 'https://api.trakt.tv/search/movie,show?query=' +
+            encodeURIComponent(titleForSearch) + yearParam + '&extended=full&limit=5';
+          deps.request(url, { headers: headers }).then(function (resp) {
+            handleResp(resp, 'title', 'fuzzy');
           }).catch(function () { noMatch(); });
         }
       });
