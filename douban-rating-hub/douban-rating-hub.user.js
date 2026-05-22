@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.4
+// @version      1.1.5
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -368,11 +368,88 @@
   const CACHE_TTL_SUCCESS = 7 * 24 * 60 * 60 * 1000;    // 7 天
   const CACHE_TTL_NEGATIVE = 24 * 60 * 60 * 1000;        // 1 天
   const CACHE_TTL_RATE_LIMITED = 5 * 60 * 1000;           // 5 分钟
+  const CACHE_TTL_ERROR_SHORT = 30 * 60 * 1000;           // 30 分钟（首次/偶发错误）
+  const CACHE_TTL_ERROR_LONG = 7 * 24 * 60 * 60 * 1000;   // 7 天（连续失败后升级）
+  const ERROR_ESCALATE_THRESHOLD = 3;                     // 连续 N 次错误后升级到长 TTL
+  const FAILURE_RECORD_TTL = 30 * 24 * 60 * 60 * 1000;    // 失败计数本身 30 天后过期
 
   const CACHE_PREFIX = 'rh2:';
 
   function cacheKey(doubanId, channelKey, sourceVersion) {
     return CACHE_PREFIX + doubanId + ':' + channelKey + ':' + sourceVersion;
+  }
+
+  function failureKey(doubanId, channelKey) {
+    return CACHE_PREFIX + 'fail:' + doubanId + ':' + channelKey;
+  }
+
+  function getFailureCount(doubanId, channelKey) {
+    const key = failureKey(doubanId, channelKey);
+    const entry = deps.storage.get(key);
+    if (!entry) return 0;
+    if (entry.fetchedAt && entry.ttl && Date.now() > entry.fetchedAt + entry.ttl) {
+      deps.storage.remove(key);
+      return 0;
+    }
+    return entry.count || 0;
+  }
+
+  function incrementFailureCount(doubanId, channelKey) {
+    const current = getFailureCount(doubanId, channelKey);
+    const newCount = current + 1;
+    deps.storage.set(failureKey(doubanId, channelKey), {
+      count: newCount,
+      fetchedAt: Date.now(),
+      ttl: FAILURE_RECORD_TTL,
+    });
+    return newCount;
+  }
+
+  function resetFailureCount(doubanId, channelKey) {
+    deps.storage.remove(failureKey(doubanId, channelKey));
+  }
+
+  // SlugMap — 跨平台身份缓存（豆瓣 ID → 各 channel 详情页 URL）
+  // 长 TTL（90 天），用于在 channel cache 过期后跳过 fuzzy 搜索步骤，
+  // 直接拼出 URL 抓分。slug/detail-URL 几乎不变，但分数会变，因此分两层 TTL。
+  const SLUGMAP_TTL = 90 * 24 * 60 * 60 * 1000;  // 90 天
+
+  function slugMapKey(doubanId) {
+    return CACHE_PREFIX + 'slugmap:' + doubanId;
+  }
+
+  function getSlugMap(doubanId) {
+    if (!doubanId) return null;
+    const entry = deps.storage.get(slugMapKey(doubanId));
+    if (!entry) return null;
+    if (entry.fetchedAt && entry.ttl && Date.now() > entry.fetchedAt + entry.ttl) {
+      deps.storage.remove(slugMapKey(doubanId));
+      return null;
+    }
+    return entry.data || null;
+  }
+
+  function addChannelUrlToSlugMap(doubanId, channelKey, channelResult) {
+    if (!doubanId || !channelKey || !channelResult || !channelResult.url) return;
+    const existing = getSlugMap(doubanId) || { channelUrls: {}, source: 'auto' };
+    existing.channelUrls = existing.channelUrls || {};
+    // manual override 不被自动写覆盖（P2b 预留 — 当前 'auto' 总是会写）
+    if (existing.source === 'manual' && existing.channelUrls[channelKey]) return;
+    const entry = {
+      url: channelResult.url,
+      matchedBy: channelResult.matchedBy || null,
+      confidence: channelResult.matchConfidence || 'fuzzy',
+    };
+    const prev = existing.channelUrls[channelKey];
+    if (prev && prev.url === entry.url && prev.matchedBy === entry.matchedBy && prev.confidence === entry.confidence) {
+      return;  // 无变化跳过写
+    }
+    existing.channelUrls[channelKey] = entry;
+    deps.storage.set(slugMapKey(doubanId), {
+      data: existing,
+      fetchedAt: Date.now(),
+      ttl: SLUGMAP_TTL,
+    });
   }
 
   function getCache(doubanId, channelKey, sourceVersion) {
@@ -390,17 +467,26 @@
 
   function setCache(doubanId, channelKey, sourceVersion, channelResult) {
     const status = channelResult && channelResult.status;
-    // error/disabled 状态不缓存
-    if (!status || status === 'error' || status === 'disabled') return;
+    // disabled 不缓存（配置缺失时希望用户改完立即生效）
+    if (!status || status === 'disabled') return;
 
     let ttl;
-    if (status === 'rate_limited') {
-      ttl = CACHE_TTL_RATE_LIMITED;
-    } else if (status === 'no_match' || status === 'no_rating') {
-      ttl = CACHE_TTL_NEGATIVE;
+    if (status === 'error') {
+      // 负缓存：默认 30 分钟，连续失败 3 次后升级到 7 天（视为暂不可用，避免 hammer）
+      const failCount = incrementFailureCount(doubanId, channelKey);
+      ttl = failCount >= ERROR_ESCALATE_THRESHOLD ? CACHE_TTL_ERROR_LONG : CACHE_TTL_ERROR_SHORT;
     } else {
-      // success
-      ttl = CACHE_TTL_SUCCESS;
+      // 任何非 error 响应（success / no_match / no_rating / rate_limited）说明 channel 仍在响应，
+      // 重置失败计数
+      resetFailureCount(doubanId, channelKey);
+      if (status === 'rate_limited') {
+        ttl = CACHE_TTL_RATE_LIMITED;
+      } else if (status === 'no_match' || status === 'no_rating') {
+        ttl = CACHE_TTL_NEGATIVE;
+      } else {
+        // success
+        ttl = CACHE_TTL_SUCCESS;
+      }
     }
 
     const key = cacheKey(doubanId, channelKey, sourceVersion);
@@ -846,11 +932,19 @@
         return;
       }
       const doubanId = m[1];
-      const prefix = CACHE_PREFIX + doubanId + ':';
+      // 清三类 key：
+      // 1. channel cache: rh2:{doubanId}:{channel}:{ver}
+      // 2. slugMap:      rh2:slugmap:{doubanId}
+      // 3. 失败计数:      rh2:fail:{doubanId}:{channel}
+      const channelPrefix = CACHE_PREFIX + doubanId + ':';
+      const slugMapKeyExact = CACHE_PREFIX + 'slugmap:' + doubanId;
+      const failPrefix = CACHE_PREFIX + 'fail:' + doubanId + ':';
       const keys = deps.storage.listKeys();
       let removed = 0;
       keys.forEach(function (key) {
-        if (key.indexOf(prefix) === 0) {
+        if (key.indexOf(channelPrefix) === 0
+            || key === slugMapKeyExact
+            || key.indexOf(failPrefix) === 0) {
           deps.storage.remove(key);
           removed++;
         }
@@ -1318,62 +1412,12 @@
           return results;
         }
 
-        if (!titleForSearch) {
-          noMatchBoth();
-          return;
-        }
-
-        // Step 1: Search RT to find movie/tv path — validate title match
-        deps.request(searchUrl).then(function (searchResp) {
-          if (searchResp.status < 200 || searchResp.status >= 300) {
-            noMatchBoth();
-            return;
-          }
-          const searchDoc = deps.parseHTML(searchResp.responseText);
-          const allResults = searchDoc.querySelectorAll('search-page-media-row');
-          if (!allResults || allResults.length === 0) {
-            noMatchBoth();
-            return;
-          }
-          // 精确匹配 only — normalize 后完全相等才用
-          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
-          const queryNorm = normalize(titleForSearch);
-          let bestLink = null;
-          // 第一阶段：normalize 后严格相等（最高置信度）
-          for (let i = 0; i < Math.min(allResults.length, 30); i++) {
-            const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
-            if (!nameEl) continue;
-            if (normalize(nameEl.textContent) === queryNorm) { bestLink = nameEl; break; }
-          }
-          // 第二阶段：子串包含兜底（query 至少 4 字符避免短标题误配如 "Up" / "It"）
-          // 覆盖 "The Avengers" → "Marvel's The Avengers (2012)" / "The Avengers (2012)" 等 RT 加前后缀的常见情况
-          if (!bestLink && queryNorm.length >= 4) {
-            for (let i = 0; i < Math.min(allResults.length, 30); i++) {
-              const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
-              if (!nameEl) continue;
-              const nameNorm = normalize(nameEl.textContent);
-              if (!nameNorm) continue;
-              if (nameNorm.includes(queryNorm) || queryNorm.includes(nameNorm)) {
-                bestLink = nameEl; break;
-              }
-            }
-          }
-          if (!bestLink) {
-            // 没有匹配的结果
-            noMatchBoth();
-            return;
-          }
-          const moviePath = bestLink.getAttribute('href') || '';
-          if (!moviePath) {
-            noMatchBoth();
-            return;
-          }
-          const movieUrl = moviePath.startsWith('http') ? moviePath : 'https://www.rottentomatoes.com' + moviePath;
-
-          // Step 2: Fetch movie detail page and extract scores
+        // 抽出：取 RT 详情页 → 提取 critics/audience 分数 → resolve
+        // 给 fast path 和 normal 搜索路径共用
+        function fetchDetailAndResolve(movieUrl, onFail) {
           deps.request(movieUrl).then(function (movieResp) {
             if (movieResp.status < 200 || movieResp.status >= 300) {
-              noMatchBoth();
+              onFail();
               return;
             }
             const html = movieResp.responseText;
@@ -1387,7 +1431,6 @@
             const audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
             if (criticsMatch) criticsScore = parseInt(criticsMatch[1], 10);
             if (audienceMatch) audienceScore = parseInt(audienceMatch[1], 10);
-            // 评论数量：从 criticsScore/audienceScore JSON 对象中提取 reviewCount
             const criticsObj = html.match(/"criticsScore"\s*:\s*\{[^}]+\}/);
             const audienceObj = html.match(/"audienceScore"\s*:\s*\{[^}]+\}/);
             if (criticsObj) {
@@ -1418,13 +1461,69 @@
               }
             }
 
+            // 至少有一个分数命中才视为成功；都没有视为失败
+            if (criticsScore == null && audienceScore == null) {
+              onFail();
+              return;
+            }
             resolve(buildResults(criticsScore, audienceScore, criticsCount, audienceCount, movieUrl));
-          }).catch(function () {
-            noMatchBoth();
-          });
-        }).catch(function () {
-          noMatchBoth();
-        });
+          }).catch(onFail);
+        }
+
+        function normalFlow() {
+          if (!titleForSearch) { noMatchBoth(); return; }
+          // Step 1: Search RT to find movie/tv path — validate title match
+          deps.request(searchUrl).then(function (searchResp) {
+            if (searchResp.status < 200 || searchResp.status >= 300) {
+              noMatchBoth();
+              return;
+            }
+            const searchDoc = deps.parseHTML(searchResp.responseText);
+            const allResults = searchDoc.querySelectorAll('search-page-media-row');
+            if (!allResults || allResults.length === 0) {
+              noMatchBoth();
+              return;
+            }
+            const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+            const queryNorm = normalize(titleForSearch);
+            let bestLink = null;
+            // 第一阶段：normalize 后严格相等（最高置信度）
+            for (let i = 0; i < Math.min(allResults.length, 30); i++) {
+              const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
+              if (!nameEl) continue;
+              if (normalize(nameEl.textContent) === queryNorm) { bestLink = nameEl; break; }
+            }
+            // 第二阶段：子串包含兜底（query 至少 4 字符避免短标题误配如 "Up" / "It"）
+            // 覆盖 "The Avengers" → "Marvel's The Avengers (2012)" 等 RT 加前后缀的常见情况
+            if (!bestLink && queryNorm.length >= 4) {
+              for (let i = 0; i < Math.min(allResults.length, 30); i++) {
+                const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
+                if (!nameEl) continue;
+                const nameNorm = normalize(nameEl.textContent);
+                if (!nameNorm) continue;
+                if (nameNorm.includes(queryNorm) || queryNorm.includes(nameNorm)) {
+                  bestLink = nameEl; break;
+                }
+              }
+            }
+            if (!bestLink) { noMatchBoth(); return; }
+            const moviePath = bestLink.getAttribute('href') || '';
+            if (!moviePath) { noMatchBoth(); return; }
+            const movieUrl = moviePath.startsWith('http') ? moviePath : 'https://www.rottentomatoes.com' + moviePath;
+
+            // Step 2: 取详情页拿分
+            fetchDetailAndResolve(movieUrl, noMatchBoth);
+          }).catch(noMatchBoth);
+        }
+
+        // FAST PATH: slugMap 命中过的 RT 详情页 URL 直接抓，跳过搜索
+        const fastEntry = meta.cachedUrls && (meta.cachedUrls.rt_critics || meta.cachedUrls.rt_audience);
+        if (fastEntry && fastEntry.url) {
+          fetchDetailAndResolve(fastEntry.url, normalFlow);
+          return;
+        }
+
+        normalFlow();
       });
     },
   });
@@ -1667,29 +1766,47 @@
           });
         }
 
+        // 抽出"取详情页 → 解析 → resolve 或 fallback"逻辑，给 fast path 和 IMDB ID 路径共用
+        function fetchDetailAndResolve(detailUrl, matchedBy, confidence, onFail) {
+          deps.request(detailUrl).then(function (pageResp) {
+            if (pageResp.status === 403 || pageResp.status === 404) {
+              onFail();
+              return;
+            }
+            const finalUrl = pageResp.finalUrl || detailUrl;
+            const parsed = parseFromPage(pageResp.responseText, finalUrl);
+            if (parsed && !isNaN(parsed.score)) {
+              resolve(buildSuccess(parsed.score, parsed.count, parsed.url, matchedBy, confidence));
+            } else {
+              onFail();
+            }
+          }).catch(onFail);
+        }
+
         // PRIMARY: 有 IMDB ID → /imdb/{id}/ 直链（302 → 详情页）
         // 注：原 CSI 端点 /csi/film/imdb/{id}/ratings-summary/ 已废弃（返 404），
         // 之前是 primary，现在删除——直接走 /imdb/{id}/ 省一次失败请求。
-        if (meta.imdbId) {
-          const imdbPageUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
-          deps.request(imdbPageUrl).then(function (pageResp) {
-            if (pageResp.status === 403 || pageResp.status === 404) {
-              tryTitleSearch();
-              return;
-            }
-            const finalUrl = pageResp.finalUrl || imdbPageUrl;
-            const parsed = parseFromPage(pageResp.responseText, finalUrl);
-            if (parsed && !isNaN(parsed.score)) {
-              resolve(buildSuccess(parsed.score, parsed.count, parsed.url, 'imdb_id', 'exact'));
-            } else {
-              tryTitleSearch();
-            }
-          }).catch(function () {
+        function normalFlow() {
+          if (meta.imdbId) {
+            const imdbPageUrl = 'https://letterboxd.com/imdb/' + meta.imdbId + '/';
+            fetchDetailAndResolve(imdbPageUrl, 'imdb_id', 'exact', tryTitleSearch);
+          } else {
+            // 无 IMDB ID：直接走 title search（不再一刀切 no_match）
             tryTitleSearch();
-          });
+          }
+        }
+
+        // FAST PATH: slugMap 命中过的详情页 URL 直接抓，跳过任何搜索/匹配
+        const fastEntry = meta.cachedUrls && meta.cachedUrls.letterboxd;
+        if (fastEntry && fastEntry.url) {
+          fetchDetailAndResolve(
+            fastEntry.url,
+            fastEntry.matchedBy || 'cached_url',
+            fastEntry.confidence || 'fuzzy',
+            normalFlow
+          );
         } else {
-          // 无 IMDB ID：直接走 title search（不再一刀切 no_match）
-          tryTitleSearch();
+          normalFlow();
         }
       });
     },
@@ -2850,11 +2967,20 @@
       });
 
       // 抓取未缓存的
+      // 注入 slugMap 给 source 用作 fast path（绕开 fuzzy 搜索）
+      const slugMap = getSlugMap(meta.doubanId);
+      meta.cachedUrls = (slugMap && slugMap.channelUrls) || {};
+
       source.fetch(meta, deps).then(function (results) {
         // results: { [channelKey]: ChannelResult }
         channelKeys.forEach(function (key) {
           if (cached[key]) return; // 已从缓存渲染，跳过
           const result = (results && results[key]) || { status: 'error' };
+          // 命中后把详情页 URL + matchedBy + 置信度钉进 slugMap（长 TTL 90 天）
+          // 下次访问 channel cache 过期时可走 fast path 跳过搜索
+          if (result.status === 'success' && result.url) {
+            addChannelUrlToSlugMap(meta.doubanId, key, result);
+          }
           setCache(meta.doubanId, key, source.version || '1', result);
           if (result.status === 'rate_limited') setCooldown(source.key);
           onChannelReady(key, result);
@@ -2862,7 +2988,11 @@
       }).catch(function (err) {
         deps.log('fetchAll error for source', source.key, ':', err);
         channelKeys.forEach(function (key) {
-          if (!cached[key]) onChannelReady(key, { status: 'error' });
+          if (cached[key]) return;
+          const errResult = { status: 'error' };
+          // 负缓存 error 状态：避免 fetch 抛异常时每次刷新都重试
+          setCache(meta.doubanId, key, source.version || '1', errResult);
+          onChannelReady(key, errResult);
         });
       });
     });
