@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-05-22
+
+### Added
+- **`error` 状态负缓存 + 连续失败升级**：之前任何 `error`（HTTP 5xx / 网络异常 / fetch 抛错）都**不缓存**，意味着每次刷新页面失败的 source 都重试，可能 hammer 失效中的外站 API。现在 error 状态也缓存：首次/偶发 30 分钟 TTL；连续 3 次失败后 TTL 升级到 7 天（视为暂时不可用）。任何非 error 响应（含 no_match / no_rating / rate_limited / success）都会**重置失败计数**——证明 channel 仍在响应。orchestrator 的 catch 块也会写 cache（之前 fetch 抛异常时完全不写）。
+- **两层缓存重构：slugMap（长 TTL 90 天）+ channel cache（短 TTL 7 天）**：之前 channel cache 把 slug/详情 URL 跟分数绑在一起 7 天后整体作废，每周要重做 fuzzy 搜索找 slug；slug 几乎永不变，分数才会变，这两件事 TTL 不应一样。新增 `rh2:slugmap:{doubanId}` 键，跨 channel 存 `{channelKey → {url, matchedBy, confidence}}`。命中后某 source 跳过搜索/匹配步骤，直接抓详情页拿分；channel cache 过期重拉时只重抓分数，**fuzzy 搜索从每 7 天 1 次降到每 90 天 1 次**。slugMap 也是后续 manual override（P2b）的基础——`source: 'manual'` 字段已预留。
+- **当前接入 fast path 的 source**：Letterboxd、Rotten Tomatoes（最高价值——LB title-search 节省一次搜索请求；RT 每次省一次 ~200KB 搜索页下载）。其它 source 继续走原流程，不受影响。后续版本逐步接入 Metacritic / Bangumi / MAL 等。
+
+### Changed
+- **"🗑 清除当前条目评分缓存" 菜单扩展清理范围**：之前只清 `rh2:{doubanId}:{channel}:{ver}` 形态的 channel cache；现在同时清 `rh2:slugmap:{doubanId}`（slugMap）和 `rh2:fail:{doubanId}:{channel}`（失败计数）。一次菜单点完全重置当前条目所有缓存状态。
+
 ## [1.1.4] - 2026-05-22
 
 ### Added
