@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.6
+// @version      1.1.7
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads、Trakt 等 17 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -16,6 +16,7 @@
 // @connect      api.graphql.imdb.com
 // @connect      rottentomatoes.com
 // @connect      backend.metacritic.com
+// @connect      www.metacritic.com
 // @connect      letterboxd.com
 // @connect      api.themoviedb.org
 // @connect      neodb.social
@@ -59,12 +60,14 @@
           url,
           headers: opts.headers || {},
           data: opts.data || undefined,
+          timeout: opts.timeout || 15000,
           // 默认匿名 — 评分 channel 查的是公开数据，绝不能带用户的
           // Amazon/Goodreads/weread 等站点 cookie，否则返回个性化结果会污染
           // 通用评分视角。调用方若需带 cookie 显式传 anonymous:false。
           anonymous: opts.anonymous !== false,
           onload(resp) { resolve(resp); },
           onerror(err) { reject(new Error('Request failed: ' + url)); },
+          ontimeout() { reject(new Error('Request timeout: ' + url)); },
         });
       });
     },
@@ -98,6 +101,105 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function safeLinkUrl(input) {
+    const url = String(input == null ? '' : input).trim();
+    return /^https?:\/\//i.test(url) ? url : '#';
+  }
+
+  // ============================================================
+  // 跨平台标题/年份匹配 — 纯函数，无 DOM/网络副作用（见 test/match.test.cjs）
+  // ============================================================
+
+  /**
+   * 标题归一化 — 用于跨平台标题比较：& → and，转小写，去掉所有非字母数字字符。
+   * @param {*} s
+   * @returns {string}
+   */
+  function normalizeTitle(s) {
+    return (s == null ? '' : String(s)).replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  /**
+   * 两个年份是否在 ±1 内（视为同一部片）。外片在中国上映常滞后约 1 年，故留 1 年容差。
+   * 任一年份缺失或非法 → false（无法判定，不视为匹配）。
+   * @param {*} a
+   * @param {*} b
+   * @returns {boolean}
+   */
+  function yearWithinOne(a, b) {
+    const na = parseInt(a, 10);
+    const nb = parseInt(b, 10);
+    if (isNaN(na) || isNaN(nb)) return false;
+    return Math.abs(na - nb) <= 1;
+  }
+
+  /**
+   * 从搜索候选里挑出最匹配的条目，用「标题相关 → 年份 → 相关度排名」消歧。
+   * 通用于 RT 与 MC 的搜索结果。candidates: [{nameNorm, year, href}]，顺序即搜索相关度排序。
+   *
+   * 1. 先筛标题相关的候选（归一化精确相等，或子串包含且 query≥4 字符）——
+   *    MC 搜索结果尾部会混入大量无关条目（按 token 模糊匹配），必须先过滤，
+   *    否则纯按年份会误命中无关的同年片。
+   * 2. 有 queryYear：在相关候选里取年份匹配（±1）的第一条（搜索已把最相关的排前）。
+   *    这既避开同名但错年份的经典老片（把 2026 版《木乃伊》配到 1999 版），
+   *    也跳过同年但无关/无评分的条目。
+   * 3. 无 queryYear 或无年份匹配：相关候选里精确相等优先，否则取第一条（不回归缺年份条目）。
+   * @returns {{nameNorm:string, year:string, href:string}|null}
+   */
+  function pickByYearThenTitle(candidates, queryNorm, queryYear) {
+    if (!candidates || candidates.length === 0) return null;
+    const relevant = [];
+    for (let i = 0; i < candidates.length; i++) {
+      const n = candidates[i].nameNorm;
+      if (!n) continue;
+      if (n === queryNorm) { relevant.push(candidates[i]); continue; }
+      if (queryNorm && queryNorm.length >= 4 && (n.indexOf(queryNorm) !== -1 || queryNorm.indexOf(n) !== -1)) {
+        relevant.push(candidates[i]);
+      }
+    }
+    if (relevant.length === 0) return null;
+    const qy = parseInt(queryYear, 10);
+    if (!isNaN(qy)) {
+      for (let i = 0; i < relevant.length; i++) {
+        if (yearWithinOne(relevant[i].year, qy)) return relevant[i];
+      }
+    }
+    // 无 queryYear / 无年份匹配：精确相等优先，否则第一条相关候选
+    for (let i = 0; i < relevant.length; i++) {
+      if (relevant[i].nameNorm === queryNorm) return relevant[i];
+    }
+    return relevant[0];
+  }
+
+  /**
+   * 从 RT 详情页 HTML 提取上映年份（JSON 字段 "releaseYear":"2026"）。
+   * 用于校验 fast-path 命中的缓存 URL 是否仍指向正确年份的片（治被污染的 slugMap）。
+   * @param {string} html
+   * @returns {number|null}
+   */
+  function extractRtDetailYear(html) {
+    if (!html) return null;
+    const m = html.match(/"releaseYear"\s*:\s*"?(\d{4})/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  /**
+   * 从豆瓣多条上映日期里取最早的年份（= 原始上映年，外部库 RT/MC/IMDB 均按此编目）。
+   * 豆瓣常把中国大陆重映日期排在最前（如《海上钢琴师》2019 重映在前、1998 意大利原版在后），
+   * 直接取第一条会得到重映年，导致年份消歧把正确条目误判为错年份。取最早年规避之。
+   * @param {string[]} dateTexts
+   * @returns {string|null}
+   */
+  function earliestReleaseYear(dateTexts) {
+    if (!dateTexts || !dateTexts.length) return null;
+    let min = null;
+    for (let i = 0; i < dateTexts.length; i++) {
+      const m = String(dateTexts[i]).match(/(\d{4})/);
+      if (m) { const y = parseInt(m[1], 10); if (min === null || y < min) min = y; }
+    }
+    return min === null ? null : String(min);
   }
 
   const DEFAULT_RANKING_PREFS = {
@@ -256,23 +358,26 @@
         if (englishName) originalTitle = englishName.trim();
       }
     }
-    // 3. h1 span[property="v:itemreviewed"] 去掉中文标题得到英文部分
-    //    （参考：豆瓣资源下载大师的方法）
-    if (!originalTitle) {
-      const reviewedEl = document.querySelector('#content h1 span[property="v:itemreviewed"]');
-      if (reviewedEl) {
-        // 完整标题如 "路易不容易 第一季 Louie Season 1"，去掉中文部分
-        const fullText = reviewedEl.textContent.trim();
-        // 提取连续英文段（含数字、空格、常见标点）
-        const engMatch = fullText.match(/([A-Za-z][A-Za-z0-9 :&'.,-]{2,})/);
-        if (engMatch) originalTitle = engMatch[1].trim();
-      }
+    // h1 span[property="v:itemreviewed"] 的拉丁文段（参考：豆瓣资源下载大师的方法）。
+    // 单独算出来：既作为 originalTitle 的 fallback，也作为「备选英文名」供 RT/MC 二次搜索。
+    // 这是消除歧义的关键——又名首个英文别名可能是数字形（如「碟中谍8」给 "Mission: Impossible 8"），
+    // 而 h1 拉丁段往往是规范英文官方名（"Mission: Impossible - The Final Reckoning"）。
+    // 反之外语片 h1 是原文名（意大利语等），又名才是 RT/MC 用的英文名——故二者都留作候选，按年份择优。
+    let h1LatinTitle = null;
+    const reviewedEl = document.querySelector('#content h1 span[property="v:itemreviewed"]');
+    if (reviewedEl) {
+      const engMatch = reviewedEl.textContent.trim().match(/([A-Za-z][A-Za-z0-9 :&'.,-]{2,})/);
+      if (engMatch) h1LatinTitle = engMatch[1].trim();
     }
+    // 3. h1 拉丁段
+    if (!originalTitle && h1LatinTitle) originalTitle = h1LatinTitle;
     // 4. 最终 fallback：直接从 title 变量提取英文段
     if (!originalTitle && title) {
       const engMatch = title.match(/([A-Za-z][A-Za-z0-9 :&'.,-]{2,})/);
       if (engMatch) originalTitle = engMatch[1].trim();
     }
+    // 备选英文名：h1 拉丁段若与 originalTitle 不同，则留作二次搜索候选
+    const altTitle = (h1LatinTitle && h1LatinTitle !== originalTitle) ? h1LatinTitle : null;
 
     // 主要创作者（作者/导演/表演者/艺术家/开发/制作人）
     let creator = null;
@@ -324,12 +429,12 @@
       }
     }
 
-    // 年份：电影用 [property="v:initialReleaseDate"]，书籍用「出版年:」
+    // 年份：电影用 [property="v:initialReleaseDate"]，书籍用「出版年:」。
+    // 电影取所有上映日期里的最早年（= 原始上映年），规避豆瓣把中国重映排在最前的坑。
     let year = null;
-    const releaseDateEl = document.querySelector('[property="v:initialReleaseDate"]');
-    if (releaseDateEl) {
-      const yearMatch = releaseDateEl.textContent.match(/(\d{4})/);
-      if (yearMatch) year = yearMatch[1];
+    const releaseEls = document.querySelectorAll('[property="v:initialReleaseDate"]');
+    if (releaseEls.length) {
+      year = earliestReleaseYear(Array.from(releaseEls).map(function (el) { return el.textContent; }));
     }
     if (!year) {
       const pubYearMatch = infoText.match(/出版年:\s*(\d{4})/);
@@ -354,6 +459,7 @@
       doubanId,
       title,
       originalTitle,
+      altTitle,
       creator,
       isbn,
       imdbId,
@@ -1184,7 +1290,7 @@
       // Label → 可点击链接
       const a = document.createElement('a');
       a.className = 'rating-hub-label';
-      a.href = result.url;
+      a.href = safeLinkUrl(result.url);
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       a.innerHTML = label.innerHTML; // preserves icon img + text
@@ -1237,7 +1343,7 @@
       if (result.url) {
         const a = document.createElement('a');
         a.className = 'rating-hub-label';
-        a.href = result.url;
+        a.href = safeLinkUrl(result.url);
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         a.innerHTML = label.innerHTML; // preserves icon img + text
@@ -1277,7 +1383,7 @@
       if (result.url) {
         const a = document.createElement('a');
         a.className = 'rating-hub-label';
-        a.href = result.url;
+        a.href = safeLinkUrl(result.url);
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         a.innerHTML = label.innerHTML;
@@ -1317,6 +1423,57 @@
       .replace(/\s*[,:]?\s*Season\s+\d+/i, '')
       .replace(/\s*第.{1,3}季/g, '')
       .trim();
+  }
+
+  function absolutizeUrl(href, baseUrl) {
+    if (!href) return '';
+    return href.indexOf('http') === 0 ? href : baseUrl + href;
+  }
+
+  function responseOk(resp) {
+    return resp && resp.status >= 200 && resp.status < 300;
+  }
+
+  /**
+   * 标题搜索类来源的公共流程：搜索页 → 候选详情链接 → 详情页解析。
+   * 仅封装网络/DOM 串联；具体匹配、评分解析和 no_match/no_rating 仍由各 source 自己决定。
+   */
+  function fetchSearchDetail(deps, opts) {
+    return deps.request(opts.searchUrl, opts.searchOpts || {}).then(function (searchResp) {
+      if (!responseOk(searchResp)) {
+        return { reachedDetail: false, url: opts.searchUrl };
+      }
+      const finalSearchUrl = searchResp.finalUrl || opts.searchUrl;
+      if (opts.isDetailUrl && opts.isDetailUrl(finalSearchUrl)) {
+        return {
+          reachedDetail: true,
+          url: finalSearchUrl,
+          parsed: opts.parseDetail(deps.parseHTML(searchResp.responseText), finalSearchUrl, searchResp),
+        };
+      }
+
+      const searchDoc = deps.parseHTML(searchResp.responseText);
+      const href = opts.pickDetailHref(searchDoc, searchResp);
+      if (!href) {
+        return { reachedDetail: false, url: finalSearchUrl };
+      }
+      const detailUrl = absolutizeUrl(href, opts.baseUrl);
+      return deps.request(detailUrl, opts.detailOpts || {}).then(function (detailResp) {
+        if (opts.acceptDetailResp && !opts.acceptDetailResp(detailResp)) {
+          return { reachedDetail: false, url: detailUrl };
+        }
+        const finalDetailUrl = detailResp.finalUrl || detailUrl;
+        return {
+          reachedDetail: true,
+          url: finalDetailUrl,
+          parsed: opts.parseDetail(deps.parseHTML(detailResp.responseText), finalDetailUrl, detailResp),
+        };
+      }).catch(function () {
+        return { reachedDetail: false, url: detailUrl };
+      });
+    }).catch(function () {
+      return { reachedDetail: false, url: opts.searchUrl };
+    });
   }
 
   // --- IMDB ---
@@ -1390,7 +1547,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 3,
+    key: 'rottentomatoes', label: '烂番茄', version: 5,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -1451,14 +1608,21 @@
         }
 
         // 抽出：取 RT 详情页 → 提取 critics/audience 分数 → resolve
-        // 给 fast path 和 normal 搜索路径共用
-        function fetchDetailAndResolve(movieUrl, onFail) {
+        // 给 fast path 和 normal 搜索路径共用。
+        // validateYear=true 时（仅 fast path）校验详情页年份与豆瓣年份是否一致——
+        // 用于治理被污染的 slugMap（旧缓存 URL 指向错年份的同名片，如 1999 版《木乃伊》），
+        // 冲突则 onFail 回退到 normalFlow 重搜并改写 slugMap。
+        function fetchDetailAndResolve(movieUrl, onFail, validateYear) {
           deps.request(movieUrl).then(function (movieResp) {
             if (movieResp.status < 200 || movieResp.status >= 300) {
               onFail();
               return;
             }
             const html = movieResp.responseText;
+            if (validateYear && meta.year) {
+              const detailYear = extractRtDetailYear(html);
+              if (detailYear && !yearWithinOne(detailYear, meta.year)) { onFail(); return; }
+            }
             let criticsScore = null;
             let audienceScore = null;
             let criticsCount = null;
@@ -1508,56 +1672,65 @@
           }).catch(onFail);
         }
 
-        function normalFlow() {
-          if (!titleForSearch) { noMatchBoth(); return; }
-          // Step 1: Search RT to find movie/tv path — validate title match
-          deps.request(searchUrl).then(function (searchResp) {
-            if (searchResp.status < 200 || searchResp.status >= 300) {
-              noMatchBoth();
-              return;
-            }
+        // 搜索 RT → 收集候选行（标题/年份/详情页 URL）→ pickByYearThenTitle 选出最佳。
+        // 每行的 release-year 属性是年份消歧关键（区分 1999/2017/2026 版《木乃伊》）。cb(chosen|null)
+        function searchAndSelect(searchTitle, cb) {
+          const sUrl = 'https://www.rottentomatoes.com/search?search=' + encodeURIComponent(searchTitle);
+          deps.request(sUrl).then(function (searchResp) {
+            if (searchResp.status < 200 || searchResp.status >= 300) { cb(null); return; }
             const searchDoc = deps.parseHTML(searchResp.responseText);
             const allResults = searchDoc.querySelectorAll('search-page-media-row');
-            if (!allResults || allResults.length === 0) {
-              noMatchBoth();
-              return;
-            }
-            const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
-            const queryNorm = normalize(titleForSearch);
-            let bestLink = null;
-            // 第一阶段：normalize 后严格相等（最高置信度）
+            if (!allResults || allResults.length === 0) { cb(null); return; }
+            const candidates = [];
             for (let i = 0; i < Math.min(allResults.length, 30); i++) {
               const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
               if (!nameEl) continue;
-              if (normalize(nameEl.textContent) === queryNorm) { bestLink = nameEl; break; }
+              candidates.push({
+                nameNorm: normalizeTitle(nameEl.textContent),
+                year: allResults[i].getAttribute('release-year') || '',
+                href: nameEl.getAttribute('href') || '',
+              });
             }
-            // 第二阶段：子串包含兜底（query 至少 4 字符避免短标题误配如 "Up" / "It"）
-            // 覆盖 "The Avengers" → "Marvel's The Avengers (2012)" 等 RT 加前后缀的常见情况
-            if (!bestLink && queryNorm.length >= 4) {
-              for (let i = 0; i < Math.min(allResults.length, 30); i++) {
-                const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
-                if (!nameEl) continue;
-                const nameNorm = normalize(nameEl.textContent);
-                if (!nameNorm) continue;
-                if (nameNorm.includes(queryNorm) || queryNorm.includes(nameNorm)) {
-                  bestLink = nameEl; break;
-                }
-              }
-            }
-            if (!bestLink) { noMatchBoth(); return; }
-            const moviePath = bestLink.getAttribute('href') || '';
-            if (!moviePath) { noMatchBoth(); return; }
-            const movieUrl = moviePath.startsWith('http') ? moviePath : 'https://www.rottentomatoes.com' + moviePath;
+            cb(pickByYearThenTitle(candidates, normalizeTitle(searchTitle), meta.year));
+          }).catch(function () { cb(null); });
+        }
 
-            // Step 2: 取详情页拿分
-            fetchDetailAndResolve(movieUrl, noMatchBoth);
-          }).catch(noMatchBoth);
+        function toMovieUrl(chosen) {
+          return chosen.href.startsWith('http') ? chosen.href : 'https://www.rottentomatoes.com' + chosen.href;
+        }
+
+        // 多候选标题轮询：先用主英文名搜；若命中片年份与豆瓣年份对不上、且有备选英文名
+        // （h1 拉丁段，如《碟中谍8》主名给数字别名、备选给规范官方名），再用备选名搜一次，
+        // 取年份吻合的那个；都对不上则用首个命中（fallback）。仅在有年份可校验时才试备选名。
+        function normalFlow() {
+          const titles = [];
+          if (titleForSearch) titles.push(titleForSearch);
+          const altForSearch = meta.altTitle ? stripSeason(meta.altTitle) : null;
+          if (altForSearch && meta.year && titles.indexOf(altForSearch) === -1) titles.push(altForSearch);
+          if (titles.length === 0) { noMatchBoth(); return; }
+
+          function tryTitle(idx, fallback) {
+            if (idx >= titles.length) {
+              if (fallback && fallback.href) fetchDetailAndResolve(toMovieUrl(fallback), noMatchBoth);
+              else noMatchBoth();
+              return;
+            }
+            searchAndSelect(titles[idx], function (chosen) {
+              if (chosen && chosen.href && meta.year && yearWithinOne(chosen.year, meta.year)) {
+                // 年份吻合 = 高置信，直接拿分；详情页失败再试下一个标题
+                fetchDetailAndResolve(toMovieUrl(chosen), function () { tryTitle(idx + 1, fallback || chosen); });
+              } else {
+                tryTitle(idx + 1, fallback || chosen);
+              }
+            });
+          }
+          tryTitle(0, null);
         }
 
         // FAST PATH: slugMap 命中过的 RT 详情页 URL 直接抓，跳过搜索
         const fastEntry = meta.cachedUrls && (meta.cachedUrls.rt_critics || meta.cachedUrls.rt_audience);
         if (fastEntry && fastEntry.url) {
-          fetchDetailAndResolve(fastEntry.url, normalFlow);
+          fetchDetailAndResolve(fastEntry.url, normalFlow, true);
           return;
         }
 
@@ -1568,141 +1741,140 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 5,
+    key: 'metacritic', label: 'Metacritic', version: 8,
     types: ['movie', 'game'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
       return new Promise(function (resolve) {
-        const titleRaw = meta.originalTitle || meta.title || '';
-        const titleForSlug = stripSeason(titleRaw);
-        const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(titleForSlug) + '/';
-        // MC 无 IMDB ID 查询能力，所有匹配本质都是文本搜索，统一标 fuzzy
-        const matchConfidence = 'fuzzy';
+        // 标题候选：主英文名 + 备选英文名（h1 拉丁段）。只保留含拉丁字母的，去重。
+        // 备选名仅在有年份可校验时才加（否则无法判断哪个更准，保持原行为）。
+        // 例：《碟中谍8》主名给数字别名 "Mission: Impossible 8"，备选给规范官方名
+        // "Mission: Impossible - The Final Reckoning"——后者的 slug 直接命中正确条目。
+        const primaryTitle = stripSeason(meta.originalTitle || meta.title || '');
+        const altT = meta.altTitle ? stripSeason(meta.altTitle) : null;
+        const titleCandidates = [];
+        [primaryTitle, (meta.year ? altT : null)].forEach(function (t) {
+          if (t && /[a-zA-Z]/.test(t) && titleCandidates.indexOf(t) === -1) titleCandidates.push(t);
+        });
+        const searchUrl = 'https://www.metacritic.com/search/' + encodeURIComponent(primaryTitle || '') + '/';
 
-        // If title contains no ASCII letters it's CJK-only — Metacritic has no match
-        if (!titleForSlug || !/[a-zA-Z]/.test(titleForSlug)) {
-          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-          return;
-        }
-
-        // Build slug: & → and, lowercase, strip non-alphanumeric, collapse hyphens
-        const slug = titleForSlug
-          .replace(/&/g, 'and')
-          .toLowerCase()
-          .replace(/[^a-z0-9\s]/g, '')
-          .trim()
-          .replace(/\s+/g, '-')
-          .replace(/-{2,}/g, '-')
-          .replace(/^-+|-+$/g, '');
-
-        if (!slug) {
-          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-          return;
-        }
-
-        // Finder 搜索兜底 — slug 匹配全部失败后用标题搜索
-        function tryFinderSearch() {
-          const normalize = function (s) { return (s || '').replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, ''); };
-          const queryNorm = normalize(titleForSlug);
-          // mcoTypeId: 2=movies, 1=TV shows, 13=games
-          function tryFinderForType(typeId, onFail) {
-            const finderUrl = 'https://backend.metacritic.com/finder/metacritic/web?query=' +
-              encodeURIComponent(titleForSlug) + '&mcoTypeId=' + typeId + '&limit=20';
-            deps.request(finderUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
-              if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
-              try {
-                const data = JSON.parse(resp.responseText);
-                const items = data && data.data && data.data.items;
-                if (!items || items.length === 0) { onFail(); return; }
-                let matched = null;
-                for (let i = 0; i < items.length; i++) {
-                  if (normalize(items[i].title) === queryNorm) { matched = items[i]; break; }
-                }
-                if (!matched) { onFail(); return; }
-                const score = matched.criticScoreSummary && matched.criticScoreSummary.score;
-                const finderSlug = matched.slug || '';
-                const mcUrlType = typeId === 1 ? 'tv' : (typeId === 13 ? 'game' : 'movie');
-                if (score == null || isNaN(Number(score))) {
-                  resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/' + mcUrlType + '/' + finderSlug + '/' } });
-                  return;
-                }
-                const reviewCount = (matched.criticScoreSummary && matched.criticScoreSummary.reviewCount) || null;
-                resolve({
-                  metacritic: {
-                    channelKey: 'metacritic', status: 'success',
-                    score: Number(score), scoreMax: 100,
-                    displayValue: Number(score) + '/100',
-                    count: reviewCount, countText: reviewCount ? reviewCount.toLocaleString() : null,
-                    url: 'https://www.metacritic.com/' + mcUrlType + '/' + finderSlug + '/',
-                    matchedBy: 'finder_search', matchConfidence: 'fuzzy',
-                    externalId: finderSlug,
-                  },
-                });
-              } catch (e) { onFail(); }
-            }).catch(function () { onFail(); });
-          }
-          function noMatchFinal() {
-            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
-          }
-          if (meta.type === 'game') {
-            tryFinderForType(13, noMatchFinal);
-          } else {
-            tryFinderForType(2, function () { tryFinderForType(1, noMatchFinal); });
-          }
-        }
-
-        // 尝试 movies path，404 则尝试 shows path（TV/剧集），最后 finder 搜索兜底
-        function tryMetacritic(paths) {
-          if (paths.length === 0) {
-            tryFinderSearch();
+        // 某次尝试命中了正确条目但 MC 暂无评分时，先记住 URL；所有尝试都没拿到 success 才落 no_rating，
+        // 避免「主名 slug 年份吻合但无分」抢先短路、挡住后续可能带分的备选 slug / HTML 搜索。
+        let pendingNoRating = null;
+        function noMatchFinal() {
+          if (pendingNoRating) {
+            resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: pendingNoRating } });
             return;
           }
-          const pathType = paths[0];
-          const apiUrl = 'https://backend.metacritic.com/' + pathType + '/metacritic/' + slug + '/web';
+          resolve({ metacritic: { channelKey: 'metacritic', status: 'no_match', url: searchUrl } });
+        }
+        // 标题无拉丁字母（纯 CJK）→ Metacritic 无法匹配
+        if (titleCandidates.length === 0) { noMatchFinal(); return; }
+
+        function slugify(t) {
+          return t.replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()
+            .replace(/\s+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+        }
+
+        // 取 slug 详情 API → resolve success；失败/年份不符则 onFail。
+        // 命中但无分：记下 URL 走 onFail（让后续尝试有机会拿到带分的条目），不当场 resolve。
+        function fetchSlug(apiType, urlType, foundSlug, matchedBy, yearGate, onFail) {
+          const apiUrl = 'https://backend.metacritic.com/' + apiType + '/metacritic/' + foundSlug + '/web';
           deps.request(apiUrl, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
-            if (resp.status === 404) {
-              tryMetacritic(paths.slice(1));
-              return;
-            }
-            if (resp.status < 200 || resp.status >= 300) {
-              tryMetacritic(paths.slice(1));
-              return;
-            }
+            if (resp.status < 200 || resp.status >= 300) { onFail(); return; }
             try {
               const data = JSON.parse(resp.responseText);
               const item = data && data.data && data.data.item;
+              // 年份守卫：slug 命中同名但错年份的片（如 the-mummy 永远指向 1999 版）→ 视为未命中。
+              if (yearGate && meta.year && item && item.premiereYear && !yearWithinOne(item.premiereYear, meta.year)) {
+                onFail(); return;
+              }
+              const pageUrl = 'https://www.metacritic.com/' + urlType + '/' + foundSlug + '/';
               let score = item && item.criticScoreSummary && item.criticScoreSummary.score;
               if (score == null || isNaN(Number(score))) {
-                const mcUrlNoRating = pathType === 'shows' ? 'tv' : (pathType === 'games' ? 'game' : 'movie');
-                resolve({ metacritic: { channelKey: 'metacritic', status: 'no_rating', url: 'https://www.metacritic.com/' + mcUrlNoRating + '/' + slug + '/' } });
+                if (!pendingNoRating) pendingNoRating = pageUrl;
+                onFail();
                 return;
               }
               score = Number(score);
               const reviewCount = (item && item.criticScoreSummary && item.criticScoreSummary.reviewCount) || null;
-              const mcUrlType = pathType === 'shows' ? 'tv' : (pathType === 'games' ? 'game' : 'movie');
               resolve({
                 metacritic: {
-                  channelKey: 'metacritic',
-                  status: 'success',
-                  score: score,
-                  scoreMax: 100,
-                  displayValue: score + '/100',
-                  count: reviewCount,
-                  countText: reviewCount ? reviewCount.toLocaleString() : null,
-                  url: 'https://www.metacritic.com/' + mcUrlType + '/' + slug + '/',
-                  matchedBy: 'title_slug',
-                  matchConfidence: matchConfidence,
-                  externalId: slug,
+                  channelKey: 'metacritic', status: 'success',
+                  score: score, scoreMax: 100, displayValue: score + '/100',
+                  count: reviewCount, countText: reviewCount ? reviewCount.toLocaleString() : null,
+                  url: pageUrl, matchedBy: matchedBy, matchConfidence: 'fuzzy', externalId: foundSlug,
                 },
               });
-            } catch (e) {
-              tryMetacritic(paths.slice(1));
-            }
-          }).catch(function () { tryMetacritic(paths.slice(1)); });
+            } catch (e) { onFail(); }
+          }).catch(onFail);
         }
-        // 按条目类型决定尝试顺序
-        const mcPaths = meta.type === 'game' ? ['games'] : ['movies', 'shows'];
-        tryMetacritic(mcPaths);
+
+        // 1) slug 直拼路径：每个标题候选 × 路径类型。movie→movies/shows；game→games。
+        const slugAttempts = [];
+        const seen = {};
+        titleCandidates.forEach(function (t) {
+          const s = slugify(t);
+          if (!s) return;
+          const types = meta.type === 'game' ? [['games', 'game']] : [['movies', 'movie'], ['shows', 'tv']];
+          types.forEach(function (ty) {
+            const key = ty[0] + ':' + s;
+            if (seen[key]) return;
+            seen[key] = 1;
+            slugAttempts.push({ apiType: ty[0], urlType: ty[1], slug: s });
+          });
+        });
+
+        function trySlugs(i) {
+          if (i >= slugAttempts.length) { afterSlugs(); return; }
+          const a = slugAttempts[i];
+          fetchSlug(a.apiType, a.urlType, a.slug, 'title_slug', true, function () { trySlugs(i + 1); });
+        }
+
+        // 2) HTML 搜索兜底（?category=N）：每个标题候选 × category，按年份消歧。
+        //    旧 backend finder API 对标题 query 几乎失效，故用渲染好的搜索页（带标题 + 上映年 + 链接）。
+        function afterSlugs() {
+          if (meta.type === 'game') { noMatchFinal(); return; }
+          const cats = [['2', 'movie'], ['1', 'tv']];  // 2=电影, 1=剧集
+          const attempts = [];
+          titleCandidates.forEach(function (t) {
+            cats.forEach(function (c) { attempts.push({ title: t, cat: c[0], urlType: c[1] }); });
+          });
+          function tryHtml(i) {
+            if (i >= attempts.length) { noMatchFinal(); return; }
+            const at = attempts[i];
+            const url = 'https://www.metacritic.com/search/' + encodeURIComponent(at.title) + '/?category=' + at.cat;
+            deps.request(url).then(function (resp) {
+              if (resp.status < 200 || resp.status >= 300) { tryHtml(i + 1); return; }
+              const doc = deps.parseHTML(resp.responseText);
+              const itemEls = doc.querySelectorAll('.search-item');
+              const candidates = [];
+              for (let j = 0; j < itemEls.length; j++) {
+                const a = itemEls[j].querySelector('a[href^="/movie/"], a[href^="/tv/"]');
+                const titleEl = itemEls[j].querySelector('.c-search-item__title');
+                if (!a || !titleEl) continue;
+                const dateEl = itemEls[j].querySelector('.c-search-product-meta__release-date');
+                const ym = dateEl ? dateEl.textContent.match(/(\d{4})/) : null;
+                candidates.push({
+                  nameNorm: normalizeTitle(titleEl.textContent),
+                  year: ym ? ym[1] : '',
+                  href: a.getAttribute('href') || '',
+                });
+              }
+              const chosen = pickByYearThenTitle(candidates, normalizeTitle(at.title), meta.year);
+              // 有年份则要求年份吻合（避免同名错年份/无关片误命中）；无年份则用 pick 结果
+              const confident = chosen && chosen.href && (!meta.year || yearWithinOne(chosen.year, meta.year));
+              const sm = confident && chosen.href.match(/\/(movie|tv)\/([^/]+)\//);
+              if (!sm) { tryHtml(i + 1); return; }
+              const fApiType = sm[1] === 'tv' ? 'shows' : 'movies';
+              const fUrlType = sm[1] === 'tv' ? 'tv' : 'movie';
+              fetchSlug(fApiType, fUrlType, sm[2], 'title_search', false, function () { tryHtml(i + 1); });
+            }).catch(function () { tryHtml(i + 1); });
+          }
+          tryHtml(0);
+        }
+
+        trySlugs(0);
       });
     },
   });
@@ -1774,33 +1946,27 @@
             return;
           }
           const titleSearchUrl = 'https://letterboxd.com/search/films/' + encodeURIComponent(searchTitle) + '/';
-          deps.request(titleSearchUrl).then(function (searchResp) {
-            if (searchResp.status < 200 || searchResp.status >= 300) {
+          fetchSearchDetail(deps, {
+            searchUrl: titleSearchUrl,
+            baseUrl: 'https://letterboxd.com',
+            pickDetailHref: function (searchDoc) {
+              const filmLink = searchDoc.querySelector('.results .film-detail-content a')
+                || searchDoc.querySelector('a[href*="/film/"]');
+              return filmLink ? (filmLink.getAttribute('href') || '') : '';
+            },
+            parseDetail: function (doc, finalUrl, resp) {
+              return parseFromPage(resp.responseText, finalUrl);
+            },
+          }).then(function (result) {
+            if (!result.reachedDetail) {
               resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
               return;
             }
-            const searchDoc = deps.parseHTML(searchResp.responseText);
-            const filmLink = searchDoc.querySelector('.results .film-detail-content a')
-              || searchDoc.querySelector('a[href*="/film/"]');
-            if (!filmLink) {
-              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
-              return;
+            if (result.parsed && !isNaN(result.parsed.score)) {
+              resolve(buildSuccess(result.parsed.score, result.parsed.count, result.parsed.url, 'title', 'fuzzy'));
+            } else {
+              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: result.url } });
             }
-            let filmUrl = filmLink.getAttribute('href');
-            if (!filmUrl.startsWith('http')) filmUrl = 'https://letterboxd.com' + filmUrl;
-            deps.request(filmUrl).then(function (filmResp) {
-              const finalUrl = filmResp.finalUrl || filmUrl;
-              const parsed = parseFromPage(filmResp.responseText, finalUrl);
-              if (parsed && !isNaN(parsed.score)) {
-                resolve(buildSuccess(parsed.score, parsed.count, parsed.url, 'title', 'fuzzy'));
-              } else {
-                resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_rating', url: finalUrl } });
-              }
-            }).catch(function () {
-              resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
-            });
-          }).catch(function () {
-            resolve({ letterboxd: { channelKey: 'letterboxd', status: 'no_match', url: searchUrl } });
           });
         }
 
@@ -2296,31 +2462,23 @@
             ? 'https://www.goodreads.com/book/isbn/' + encodeURIComponent(query)
             : 'https://www.goodreads.com/search?q=' + encodeURIComponent(query);
 
-          deps.request(url).then(function (resp) {
-            if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
-            const finalUrl = resp.finalUrl || url;
-            // ISBN 直链 302 后或 search 自动跳转到详情页 → 直接解析
-            if (detailPathRe.test(finalUrl)) {
-              const doc = deps.parseHTML(resp.responseText);
-              const parsed = parseDetail(doc, finalUrl);
-              if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
-              else { tryQuery(queryIndex + 1); }
-              return;
+          fetchSearchDetail(deps, {
+            searchUrl: url,
+            baseUrl: 'https://www.goodreads.com',
+            isDetailUrl: function (finalUrl) { return detailPathRe.test(finalUrl); },
+            pickDetailHref: function (doc) {
+              const linkEl = doc.querySelector('a.bookTitle');
+              return linkEl ? (linkEl.getAttribute('href') || '') : '';
+            },
+            acceptDetailResp: responseOk,
+            parseDetail: parseDetail,
+          }).then(function (result) {
+            if (result.reachedDetail && result.parsed) {
+              buildSuccess(result.parsed, matchedBy, confidence);
+            } else {
+              tryQuery(queryIndex + 1);
             }
-            // 仍在 search 结果页 — 找 a.bookTitle 链接
-            const doc = deps.parseHTML(resp.responseText);
-            const linkEl = doc.querySelector('a.bookTitle');
-            if (!linkEl) { tryQuery(queryIndex + 1); return; }
-            const href = linkEl.getAttribute('href') || '';
-            const detailUrl = href.startsWith('http') ? href : 'https://www.goodreads.com' + href;
-            deps.request(detailUrl).then(function (detailResp) {
-              if (detailResp.status < 200 || detailResp.status >= 300) { tryQuery(queryIndex + 1); return; }
-              const detailDoc = deps.parseHTML(detailResp.responseText);
-              const parsed = parseDetail(detailDoc, detailResp.finalUrl || detailUrl);
-              if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
-              else { tryQuery(queryIndex + 1); }
-            }).catch(function () { tryQuery(queryIndex + 1); });
-          }).catch(function () { tryQuery(queryIndex + 1); });
+          });
         }
 
         tryQuery(0);
@@ -2480,28 +2638,28 @@
 
           // /s?k= 搜索路径
           const searchUrl = 'https://www.amazon.com/s?k=' + encodeURIComponent(q.value);
-          deps.request(searchUrl, { headers: { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } })
-            .then(function (resp) {
-              if (resp.status < 200 || resp.status >= 300) { tryQuery(queryIndex + 1); return; }
-              const finalUrl = resp.finalUrl || searchUrl;
-              // If search landed directly on a product detail page
-              if (dpPathRe.test(finalUrl)) {
-                const doc = deps.parseHTML(resp.responseText);
-                const parsed = parseDetail(doc, finalUrl);
-                if (parsed) { buildSuccess(parsed, matchedBy, confidence); }
-                else { tryQuery(queryIndex + 1); }
-                return;
-              }
-              // Search results — find first result link
-              const doc = deps.parseHTML(resp.responseText);
+          const htmlHeaders = { 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' };
+          fetchSearchDetail(deps, {
+            searchUrl: searchUrl,
+            searchOpts: { headers: htmlHeaders },
+            detailOpts: { headers: htmlHeaders },
+            baseUrl: 'https://www.amazon.com',
+            isDetailUrl: function (finalUrl) { return dpPathRe.test(finalUrl); },
+            pickDetailHref: function (doc) {
               const resultEl = doc.querySelector('[data-component-type="s-search-result"]');
-              if (!resultEl) { tryQuery(queryIndex + 1); return; }
+              if (!resultEl) return '';
               const linkEl = resultEl.querySelector('h2 a') || resultEl.querySelector('a[href*="/dp/"]');
-              if (!linkEl) { tryQuery(queryIndex + 1); return; }
-              const href = linkEl.getAttribute('href') || '';
-              const detailUrl = href.startsWith('http') ? href : 'https://www.amazon.com' + href;
-              fetchDetail(detailUrl, matchedBy, confidence, function () { tryQuery(queryIndex + 1); });
-            }).catch(function () { tryQuery(queryIndex + 1); });
+              return linkEl ? (linkEl.getAttribute('href') || '') : '';
+            },
+            acceptDetailResp: responseOk,
+            parseDetail: parseDetail,
+          }).then(function (result) {
+            if (result.reachedDetail && result.parsed) {
+              buildSuccess(result.parsed, matchedBy, confidence);
+            } else {
+              tryQuery(queryIndex + 1);
+            }
+          });
         }
 
         tryQuery(0);
@@ -3381,7 +3539,7 @@
       el.innerHTML = ''
         + '<span class="rank-label-no"><span>' + escapeHtml(this._formatRank(mark)) + '</span></span>'
         + '<span class="rank-label-link">'
-        +   '<a href="' + escapeHtml(mark.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(mark.title) + '</a>'
+        +   '<a href="' + escapeHtml(safeLinkUrl(mark.url)) + '" target="_blank" rel="noopener">' + escapeHtml(mark.title) + '</a>'
         + '</span>';
       return el;
     },
@@ -3497,10 +3655,17 @@
     rankingMarksMain(meta);
   }
 
-  // DOM 就绪后执行
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    setTimeout(init, 300);
+  // DOM 就绪后执行（Node 测试环境下无 document，跳过浏览器初始化）
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      setTimeout(init, 300);
+    }
+  }
+
+  // Node 测试钩子：仅导出纯决策函数供单测，绝不触发任何浏览器初始化
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { normalizeTitle, yearWithinOne, pickByYearThenTitle, extractRtDetailYear, earliestReleaseYear, fetchSearchDetail, absolutizeUrl };
   }
 })();

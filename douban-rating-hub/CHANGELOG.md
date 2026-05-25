@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-05-25
+
+### Fixed
+- **烂番茄 / Metacritic 同名片错配年份**（用户报告：[新版《木乃伊》(36929221)](https://movie.douban.com/subject/36929221/) 抓到 1999 版分数）：RT/MC 无 IMDB ID 查询能力，纯按英文标题文本匹配；当豆瓣英文名是通用标题（如 "The Mummy"）时，会命中最知名的经典老片而非当前条目。IMDB/Letterboxd 用豆瓣 IMDB ID 直连，不受影响。
+  - **烂番茄**：搜索结果改为读每行的 `release-year` 属性，用豆瓣年份（±1 容差）消歧——先筛标题相关候选，再在年份匹配的候选里取相关度第一（既避开错年份的经典片，也跳过同年无评分的同名垃圾条目）；无年份匹配时回退「精确→子串」，不回归缺年份条目。fast-path 命中缓存 URL 时额外校验详情页年份，自愈被污染的 slugMap（版本 bump 不清 slugMap）。
+  - **Metacritic**：slug 主路径拿到 `premiereYear`，与豆瓣年份冲突（>1）则落到下一路径；兜底从失效的 backend finder API（对标题 query 返回无关结果）改为站内搜索页 `?category=2`（电影）/ `?category=1`（剧集），按「标题相关 → 年份 → 相关度」选片，命中后取详情 API 拿分+评论数。例：新版《木乃伊》经典 slug `the-mummy` 指向 1999 版（49 分），年份守卫拒绝后经搜索正确命中 Lee Cronin 版（47 分）。新增 `@connect www.metacritic.com`。
+- **同名片标题来源不稳定导致错配**（如 2025《[碟中谍8](https://movie.douban.com/subject/30433456/)》抓到 1996 初代）：豆瓣 `原作名` 缺失时，`又名` 首个英文别名可能是数字形 "Mission: Impossible 8"（漏掉副标题），而 RT/MC 用的是 "Mission: Impossible - The Final Reckoning"——前者只能子串命中初代，年份也救不回（正确条目压根没进候选）。修复：`extractMeta` 额外暴露 `altTitle`（h1 `v:itemreviewed` 拉丁段，常为规范官方名）；RT/MC 改为**多候选标题轮询**——先用主英文名搜，若命中片年份与豆瓣年份对不上、且有备选名，再用备选名搜（RT 重搜一次、MC 多拼一组 slug + 多搜一次），取年份吻合者。反向也成立：外语片（如《海上钢琴师》h1 是意大利语原名）靠 `又名` 英文名命中，主名先成则不会用备选名，**无回归、无额外请求**。仅在有年份可校验时才启用备选名。
+- **重映片取错年份导致漏配**（如《[海上钢琴师](https://movie.douban.com/subject/1292001/)》MC 显示未收录）：豆瓣把中国重映日期排在 `v:initialReleaseDate` 最前（2019 重映在前、1998 意大利原版在后），旧逻辑取第一条得到重映年 2019，而 RT/MC/IMDB 按原始年 1998 编目 → 年份消歧把正确条目判为错年份。修复：`extractMeta` 改取所有上映日期里的**最早年**（= 原始上映年）。新增纯函数 `earliestReleaseYear` + 单测。
+- 核心匹配逻辑抽为纯函数 `pickByYearThenTitle` 并加 Node 单测（`test/match.test.cjs`，`node --test`），用**真实 RT/MC 搜索 HTML fixture** 坐实「2026 版选 Lee Cronin、1999/2017 版不回归、同年但标题无关的片不误配」；多候选轮询 + 最早年逻辑用真实 live 数据端到端验证（碟中谍走备选名命中 2025、海上钢琴师取 1998 原始年命中、不回归）。
+
+### 健壮性 & 安全
+- **请求超时**：`deps.request` 与榜单 `_fetchJson` 加 15s 超时 + `ontimeout` 拒绝，避免外站请求卡死导致评分行永久「加载中」。
+- **外链 scheme 白名单**：渲染评分行 / 榜单胶囊链接前用 `safeLinkUrl()` 校验，仅放行 `http(s)`，防止被污染的上游榜单数据注入 `javascript:` 等非法 href。
+
+### 内部重构（行为不变）
+- 抽出 `fetchSearchDetail()` 公共流程（搜索页 → 候选详情链接 → 详情页解析），迁移 Letterboxd 标题兜底、Goodreads、Amazon 三个标题搜索源去重；逐行核对行为一致（含 ISBN 直链、`/dp/` 直链、anti-bot 请求头、结果作用域内选链等分支），并为 `fetchSearchDetail` 补全分支单测（搜索失败 / 搜索即详情页 / 无候选链接 / 详情失败 / 详情 reject / 搜索 reject）。
+
+### Cache invalidation
+- bump source version：`rottentomatoes` 3→5、`metacritic` 5→8，让本版年份消歧 + 多候选标题 + 最早年逻辑对已缓存条目立即生效。
+
 ## [1.1.6] - 2026-05-22
 
 ### Added
