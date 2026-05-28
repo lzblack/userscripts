@@ -103,11 +103,155 @@ test('pickByYearThenTitle: no title-relevant candidate returns null', () => {
 
 test('pickByYearThenTitle: parses the real RT search fixture and picks Lee Cronin\'s 2026', () => {
   const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'rt-search-the-mummy.html'), 'utf8');
-  const candidates = parseRtRows(html, rh.normalizeTitle);
+  const candidates = parseRtRows(html, rh.normalizeTitle, '2026');
   assert.ok(candidates.length >= 4, 'fixture should yield several rows');
   const chosen = rh.pickByYearThenTitle(candidates, rh.normalizeTitle('The Mummy'), '2026');
   assert.ok(chosen, 'expected a match from RT fixture');
   assert.match(chosen.href, /lee_cronins_the_mummy/);
+});
+
+// v1.1.8: 甜蜜家园 (Sweet Home, 韩剧 2020) 错配 "Home Sweet Home Alone"。
+// 关键修复：(a) 子串相关性收紧为「前缀/后缀」；(b) RT TV 行用 startyear 属性，旧代码只读 release-year。
+test('pickByYearThenTitle: Sweet Home 2020 (Korean drama) — middle-substring rivals must NOT win', () => {
+  // 真实 RT 搜索结果（节选），movies 组在前 / TV 组在后。
+  // "Home Sweet Home Alone" (2021) 中段含 "sweet home" + 年份 ±1，旧规则会先中标。
+  const cands = [
+    { nameNorm: 'sweethomealabama', year: '2002', href: '/m/sweet_home_alabama' },
+    { nameNorm: 'homesweethomealone', year: '2021', href: '/m/home_sweet_home_alone' }, // ← 中段子串 + 年份±1 陷阱
+    { nameNorm: 'homesweethomerebirth', year: '2025', href: '/m/home_sweet_home_rebirth' },
+    { nameNorm: 'homesweethome', year: '2024', href: '/m/home_sweet_home_2024' },
+    { nameNorm: 'sweethome', year: '2015', href: '/m/sweet_home_2015' },           // ← exact，但年份错
+    { nameNorm: 'sweethomecarolina', year: '2017', href: '/m/sweet_home_carolina' },
+    { nameNorm: 'sweethome', year: '2020', href: '/tv/sweet_home' },                // ← 真片：exact + year 吻合（依赖 startyear 读取修复）
+  ];
+  const chosen = rh.pickByYearThenTitle(cands, 'sweethome', '2020');
+  assert.ok(chosen, 'expected a match');
+  assert.match(chosen.href, /\/tv\/sweet_home$/, 'should pick the Korean TV drama, not Home Sweet Home Alone');
+});
+
+test('pickByYearThenTitle: middle-substring is rejected (no year match → fallback to exact)', () => {
+  // 即使没有年份吻合的候选，中段子串也不应进入相关集——保证 fallback 走 exact 而非 HSHA。
+  const cands = [
+    { nameNorm: 'homesweethomealone', year: '2021', href: '/m/home_sweet_home_alone' },
+    { nameNorm: 'sweethome', year: '2015', href: '/m/sweet_home_2015' },
+  ];
+  const chosen = rh.pickByYearThenTitle(cands, 'sweethome', '2099');
+  assert.ok(chosen);
+  assert.match(chosen.href, /sweet_home_2015/, 'fallback must hit exact match, not middle-substring HSHA');
+});
+
+// Regression coverage for popular titles where the OLD permissive (any-substring)
+// rule and the NEW (prefix/suffix-only) rule should agree.
+test('pickByYearThenTitle: suffix substring still relevant (Lee Cronin\'s The Mummy is suffix of "themummy")', () => {
+  const cands = [
+    { nameNorm: 'leecroninsthemummy', year: '2026', href: '/m/lee_cronins_the_mummy' },
+  ];
+  const chosen = rh.pickByYearThenTitle(cands, 'themummy', '2026');
+  assert.match(chosen.href, /lee_cronins_the_mummy/);
+});
+
+test('pickByYearThenTitle: prefix substring still relevant (Dune Part Two for query "dune")', () => {
+  // Douban originalTitle 通常是规范全名，这里用短 query 模拟一种极端情况
+  const cands = [
+    { nameNorm: 'duneparttwo', year: '2024', href: '/m/dune_part_two' },
+    { nameNorm: 'dune', year: '2021', href: '/m/dune_2021' },
+  ];
+  const chosen = rh.pickByYearThenTitle(cands, 'dune', '2024');
+  assert.match(chosen.href, /dune_part_two/);
+});
+
+test('pickByYearThenTitle: query is prefix of candidate (Frozen → Frozen II)', () => {
+  const cands = [
+    { nameNorm: 'frozen', year: '2013', href: '/m/frozen_2013' },
+    { nameNorm: 'frozenii', year: '2019', href: '/m/frozen_ii' },
+  ];
+  const chosen = rh.pickByYearThenTitle(cands, 'frozen', '2019');
+  assert.match(chosen.href, /frozen_ii/);
+});
+
+test('pickByYearThenTitle: candidate is prefix of query (Dark Knight → query thedarkknight)', () => {
+  // queryNorm.endsWith(n)：n="darkknight" 是 queryNorm="thedarkknight" 的后缀
+  const cands = [{ nameNorm: 'darkknight', year: '2008', href: '/m/dark_knight' }];
+  const chosen = rh.pickByYearThenTitle(cands, 'thedarkknight', '2008');
+  assert.match(chosen.href, /dark_knight/);
+});
+
+// 端到端 fixture 测试：parseRtRows 用真实的 computeRtCandidateYear 计算 year，
+// 确保 searchAndSelect 在浏览器里的整条链路（DOM 属性 → year 计算 → pickByYearThenTitle）正确。
+test('Sweet Home RT fixture — S1 user (queryYear=2020) picks /tv/sweet_home', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'rt-search-sweet-home.html'), 'utf8');
+  const candidates = parseRtRows(html, rh.normalizeTitle, '2020');
+  assert.ok(candidates.length >= 6, 'fixture should yield many rows');
+  const tv = candidates.find((c) => c.href === 'https://www.rottentomatoes.com/tv/sweet_home');
+  assert.ok(tv, 'TV row must be in candidate list');
+  assert.strictEqual(tv.year, '2020', 'S1 user: TV row year = startyear = queryYear');
+  const chosen = rh.pickByYearThenTitle(candidates, rh.normalizeTitle('Sweet Home'), '2020');
+  assert.match(chosen.href, /\/tv\/sweet_home$/);
+});
+
+test('Sweet Home RT fixture — S2 user (queryYear=2023) picks /tv/sweet_home via airing-range', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'rt-search-sweet-home.html'), 'utf8');
+  const candidates = parseRtRows(html, rh.normalizeTitle, '2023');
+  const tv = candidates.find((c) => c.href === 'https://www.rottentomatoes.com/tv/sweet_home');
+  assert.strictEqual(tv.year, '2023', 'S2 user: TV row year coerced to queryYear because 2023 ∈ [2020, current]');
+  const chosen = rh.pickByYearThenTitle(candidates, rh.normalizeTitle('Sweet Home'), '2023');
+  assert.match(chosen.href, /\/tv\/sweet_home$/, 'S2 user must hit Korean TV drama, not unrelated 2015 Spanish horror');
+});
+
+test('Sweet Home RT fixture — S3 user (queryYear=2024) picks /tv/sweet_home via airing-range', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'rt-search-sweet-home.html'), 'utf8');
+  const candidates = parseRtRows(html, rh.normalizeTitle, '2024');
+  const chosen = rh.pickByYearThenTitle(candidates, rh.normalizeTitle('Sweet Home'), '2024');
+  assert.match(chosen.href, /\/tv\/sweet_home$/);
+});
+
+// computeRtCandidateYear: pure helper unit tests
+test('computeRtCandidateYear: movie row uses release-year directly', () => {
+  assert.strictEqual(rh.computeRtCandidateYear('2026', null, null, '2026'), '2026');
+  assert.strictEqual(rh.computeRtCandidateYear('1999', null, null, '2026'), '1999');
+});
+
+test('computeRtCandidateYear: TV in airing range → queryYear (covers all seasons)', () => {
+  // Sweet Home 2020-至今, S2 user 2023
+  assert.strictEqual(rh.computeRtCandidateYear(null, '2020', null, '2023'), '2023');
+  // 已完结剧集 2010-2015, queryYear 2013
+  assert.strictEqual(rh.computeRtCandidateYear(null, '2010', '2015', '2013'), '2013');
+});
+
+test('computeRtCandidateYear: TV out of airing range → startyear', () => {
+  // 已完结剧集 2010-2015, queryYear 2020（区间外）
+  assert.strictEqual(rh.computeRtCandidateYear(null, '2010', '2015', '2020'), '2010');
+});
+
+test('computeRtCandidateYear: missing data falls back gracefully', () => {
+  assert.strictEqual(rh.computeRtCandidateYear(null, null, null, '2020'), '');
+  assert.strictEqual(rh.computeRtCandidateYear(null, '2020', null, null), '2020', 'no queryYear → startyear');
+});
+
+// v1.1.8: extractRtScores — handles both movie (number) and TV (object) JSON forms.
+test('extractRtScores: TV detail page (object form) extracts critics & audience scores', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'fixtures', 'rt-detail-sweet-home-tv.html'), 'utf8');
+  const scores = rh.extractRtScores(html);
+  assert.strictEqual(scores.criticsScore, 83, 'TV page Avg. Tomatometer = 83');
+  assert.strictEqual(scores.audienceScore, 66, 'TV page Avg. Popcornmeter = 66');
+  assert.ok(scores.criticsCount && scores.criticsCount > 0, 'critics reviewCount extracted');
+});
+
+test('extractRtScores: movie detail page (number form) still works', () => {
+  // 简化的电影页 JSON 形态
+  const html = '<html><script>{"criticsScore":83,"audienceScore":92}</script></html>';
+  const scores = rh.extractRtScores(html);
+  assert.strictEqual(scores.criticsScore, 83);
+  assert.strictEqual(scores.audienceScore, 92);
+});
+
+test('extractRtScores: empty / missing inputs return all-null', () => {
+  assert.deepStrictEqual(rh.extractRtScores(''), {
+    criticsScore: null, audienceScore: null, criticsCount: null, audienceCount: null,
+  });
+  assert.deepStrictEqual(rh.extractRtScores('<html>no score data</html>'), {
+    criticsScore: null, audienceScore: null, criticsCount: null, audienceCount: null,
+  });
 });
 
 test('pickByYearThenTitle: parses the real MC search fixture and picks Lee Cronin\'s 2026', () => {
@@ -146,21 +290,30 @@ test('extractRtDetailYear: reads releaseYear from detail-page JSON', () => {
 
 // --- fixture parsers: mirror the userscript's DOM extraction with regex ---
 
-function parseRtRows(html, normalize) {
+// Parse RT search HTML mirroring the userscript's DOM extraction + year-computation.
+// queryYear lets us exercise the TV airing-range logic (v1.1.8: multi-season TV like Sweet Home
+// must hit /tv/sweet_home whether the user is on S1=2020, S2=2023, or S3=2024).
+function parseRtRows(html, normalize, queryYear) {
   const rows = [];
   const re = /<search-page-media-row\b[\s\S]*?<\/search-page-media-row>/g;
   let m;
   while ((m = re.exec(html)) !== null) {
     const block = m[0];
-    const yearM = block.match(/release-year="(\d{0,4})"/);
+    const relYM = block.match(/release-year="(\d{0,4})"/);
+    const startYM = block.match(/startyear="(\d{0,4})"/);
+    const endYM = block.match(/endyear="(\d{0,4})"/);
     const nameM = block.match(/data-qa="info-name"[^>]*>\s*([\s\S]*?)\s*<\/a>/);
-    // Pull href from the info-name <a> tag itself, order-independent (mirrors getAttribute).
     const aTagM = block.match(/<a\b[^>]*data-qa="info-name"[^>]*>/);
     const hrefM = aTagM ? aTagM[0].match(/href="([^"]*)"/) : null;
     if (!nameM) continue;
     rows.push({
       nameNorm: normalize(decode(nameM[1])),
-      year: yearM ? yearM[1] : '',
+      year: rh.computeRtCandidateYear(
+        relYM ? relYM[1] : null,
+        startYM ? startYM[1] : null,
+        endYM ? endYM[1] : null,
+        queryYear
+      ),
       href: hrefM ? hrefM[1] : '',
     });
   }

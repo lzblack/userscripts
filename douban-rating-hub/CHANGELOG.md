@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-05-28
+
+### Fixed
+- **烂番茄韩剧/电视剧错配同名电影**（用户报告：[甜蜜家园](https://movie.douban.com/subject/34858078/) RT 抓到 *Home Sweet Home (2021)* 而非 Netflix 韩剧）：根因有两条，叠加触发——
+  - **RT 搜索结果行属性命名不一致**：电影行用 `release-year`（中划线），TV 行用 `startyear`（无中划线），且 `releaseyear` 字段恒为空。旧代码只读 `release-year`，所有 TV 行得到 `year=''`，无法参与年份消歧，真正的 `/tv/sweet_home`（startyear=2020）永远被跳过。修复：搜索候选 `year` 字段同时读 `release-year` 和 `startyear`。
+  - **`pickByYearThenTitle` 相关性过滤太宽**：旧规则 `n.indexOf(q) !== -1 || q.indexOf(n) !== -1`（任意子串）让 *Home Sweet Home (2021)*（"sweethome" 是 "homesweethome" 后缀）和 *Home Sweet Home Alone (2021)*（中段含 "sweet home"）都被认作 "Sweet Home" 相关，配合 ±1 年份匹配先于真正的 `/tv/sweet_home` 中标。修复：收紧为「两边必须前缀/后缀关系，且多出来的那段不是另一边的子串」——既排除 *Home Sweet Home Alone* 这类无前后缀关系的中段子串，也排除 *Home Sweet Home* 这类「token 重叠」的伪后缀（"home" 已经出现在 "sweethome" 中）；同时保留 *Lee Cronin's The Mummy* 这类合法的修饰前缀（"leecronins" 不出现在 "themummy" 中）。
+- **RT 电视剧详情页分数解析不准**：电视剧详情页的 `criticsScore`/`audienceScore` 是对象形态 `{"score":"83","reviewCount":12,...}`，电影页是数字形态 `"criticsScore":83`。旧代码只匹配数字形态，电视剧走 Method A 失败、回退 DOM 选择器拿到的是首个 `rt-text[slot="critics-score"]` 元素（往往是某一季的分数而非整剧综合分）。修复：抽出 `extractRtScores(html)` 纯函数同时处理两种形态，TV 页直接拿到总评 Avg. Tomatometer / Avg. Popcornmeter。
+- **多季 TV 剧 S2/S3 季页错配同名电影**：Sweet Home TV `startyear=2020`，S1 用户 queryYear=2020 ±1 命中；S2 用户 queryYear=2023 与 startyear 差 3 年，落选后回退选到 *Sweet Home (2015)* 西班牙惊悚片（80% 分数，毫无关系）。修复：(1) `searchAndSelect` 读 TV 行 `startyear..endyear` 区间（endyear 空时延伸到当前年），豆瓣年份落在区间内即视为同年——多季用户都能命中同一个 TV 条目；(2) RT fast-path `validateYear` 跳过 `/tv/*` URL，避免 TV 详情页的 `releaseYear`（=startYear）与 S2/S3 queryYear 比对导致缓存反复失效。
+- **Metacritic 缓存可能受影响**：`pickByYearThenTitle` 被 RT 和 MC 共用；MC 同样可能在历史搜索里命中过本版收紧规则会拒绝的「中段子串 / token 重叠」匹配。bump `metacritic` 版本一并清理。
+
+### Cache invalidation
+- bump source 版本：`rottentomatoes` 5→6、`metacritic` 8→9，让本版相关性收紧 + TV airing-range + TV 详情页分数解析对已缓存条目立即生效。
+
+### 测试
+- 单测增至 43 项（27→43）：新增甜蜜家园完整搜索 fixture + 多季 airing-range 测试（S1/S2/S3 都走真实 `computeRtCandidateYear` 链路）+ 边缘 case（中段子串拒绝、token 重叠拒绝、Dune/Frozen/Dark Knight 热门片回归）+ `extractRtScores` 电影/电视/空输入。
+
 ## [1.1.7] - 2026-05-25
 
 ### Fixed
