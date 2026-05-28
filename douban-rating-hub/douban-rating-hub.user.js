@@ -2,7 +2,7 @@
 // @name         豆瓣评分汇 | Douban Rating Hub
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.7
+// @version      1.1.8
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads、Trakt 等 17 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -139,7 +139,12 @@
    * 从搜索候选里挑出最匹配的条目，用「标题相关 → 年份 → 相关度排名」消歧。
    * 通用于 RT 与 MC 的搜索结果。candidates: [{nameNorm, year, href}]，顺序即搜索相关度排序。
    *
-   * 1. 先筛标题相关的候选（归一化精确相等，或子串包含且 query≥4 字符）——
+   * 1. 先筛标题相关的候选：归一化精确相等，或两边互为**前缀/后缀**且「多出来的那段」
+   *    不是另一边的子串（v1.1.8 起，旧规则「任意 indexOf」会错配）。
+   *    - 接受："Lee Cronin's The Mummy" 后缀含 "The Mummy"，多出 "leecronins" 不在 query 中
+   *    - 拒绝："Home Sweet Home" 后缀含 "Sweet Home"，但多出 "home" 又出现在 query "sweethome" 中
+   *      → token 重叠/伪关系，不是同一片名的修饰版本
+   *    - 拒绝："Home Sweet Home Alone" 完全是中段子串，无前缀/后缀关系
    *    MC 搜索结果尾部会混入大量无关条目（按 token 模糊匹配），必须先过滤，
    *    否则纯按年份会误命中无关的同年片。
    * 2. 有 queryYear：在相关候选里取年份匹配（±1）的第一条（搜索已把最相关的排前）。
@@ -155,9 +160,18 @@
       const n = candidates[i].nameNorm;
       if (!n) continue;
       if (n === queryNorm) { relevant.push(candidates[i]); continue; }
-      if (queryNorm && queryNorm.length >= 4 && (n.indexOf(queryNorm) !== -1 || queryNorm.indexOf(n) !== -1)) {
-        relevant.push(candidates[i]);
-      }
+      if (!queryNorm || queryNorm.length < 4) continue;
+      // 必须是前缀/后缀关系：取长串和短串，看长串是否以短串开头或结尾
+      const longer = n.length >= queryNorm.length ? n : queryNorm;
+      const shorter = n.length >= queryNorm.length ? queryNorm : n;
+      let removed = null;
+      if (longer.startsWith(shorter)) removed = longer.slice(shorter.length);
+      else if (longer.endsWith(shorter)) removed = longer.slice(0, longer.length - shorter.length);
+      if (removed === null) continue;
+      // 「多出来的那段」反向包含于短串 → token 重叠/伪关系，拒绝
+      // 关键例：n="homesweethome", q="sweethome"，removed="home"，"home" ⊂ "sweethome" → 拒绝
+      if (shorter.indexOf(removed) !== -1) continue;
+      relevant.push(candidates[i]);
     }
     if (relevant.length === 0) return null;
     const qy = parseInt(queryYear, 10);
@@ -183,6 +197,72 @@
     if (!html) return null;
     const m = html.match(/"releaseYear"\s*:\s*"?(\d{4})/);
     return m ? parseInt(m[1], 10) : null;
+  }
+
+  /**
+   * 计算 RT 搜索行的「用于年份消歧的年份」。
+   * 电影行有 `release-year`，直接用。TV 行只有 `startyear` / `endyear`（多季播出区间）——
+   * 若豆瓣季页年份落在 [startYear, endYear || 当前年]，把候选年视为豆瓣年份，避免 S2/S3
+   * 因 startyear 与 queryYear 差几年被 ±1 年份消歧拒掉。否则用 startyear。
+   * @param {number|string|null} releaseYear  电影行的 release-year（中划线属性）
+   * @param {number|string|null} startYear    TV 行的 startyear（无中划线）
+   * @param {number|string|null} endYear      TV 行的 endyear（无中划线，空=至今）
+   * @param {number|string|null} queryYear    豆瓣条目年份
+   * @returns {string} 用作 candidate.year 的字符串（不可用时返回 ''）
+   */
+  function computeRtCandidateYear(releaseYear, startYear, endYear, queryYear) {
+    if (releaseYear) return String(releaseYear);
+    const startY = parseInt(startYear, 10);
+    if (isNaN(startY)) return '';
+    const endY = parseInt(endYear, 10);
+    const queryY = parseInt(queryYear, 10);
+    const effectiveEnd = isNaN(endY) ? new Date().getFullYear() : endY;
+    if (!isNaN(queryY) && queryY >= startY && queryY <= effectiveEnd) {
+      return String(queryY);
+    }
+    return String(startY);
+  }
+
+  /**
+   * 从 RT 详情页 HTML 抽取 critics / audience 分数与评论数。
+   * 兼容两种 JSON 形态：
+   *   - 电影页："criticsScore": 83
+   *   - TV 页 ："criticsScore": {"score":"83", "reviewCount":12, ...}
+   * v1.1.8 之前仅匹配数字形态，TV 页走不上 JSON → DOM fallback 拿到的是季级分而非总评。
+   * @param {string} html
+   * @returns {{criticsScore: number|null, audienceScore: number|null, criticsCount: number|null, audienceCount: number|null}}
+   */
+  function extractRtScores(html) {
+    let criticsScore = null;
+    let audienceScore = null;
+    let criticsCount = null;
+    let audienceCount = null;
+    if (!html) return { criticsScore, audienceScore, criticsCount, audienceCount };
+
+    const criticsNum = html.match(/"criticsScore"\s*:\s*(\d+)/);
+    const audienceNum = html.match(/"audienceScore"\s*:\s*(\d+)/);
+    if (criticsNum) criticsScore = parseInt(criticsNum[1], 10);
+    if (audienceNum) audienceScore = parseInt(audienceNum[1], 10);
+
+    const criticsObj = html.match(/"criticsScore"\s*:\s*\{[^}]+\}/);
+    const audienceObj = html.match(/"audienceScore"\s*:\s*\{[^}]+\}/);
+    if (criticsObj) {
+      const cm = criticsObj[0].match(/"reviewCount"\s*:\s*(\d+)/);
+      if (cm) criticsCount = parseInt(cm[1], 10);
+      if (criticsScore == null) {
+        const sm = criticsObj[0].match(/"score"\s*:\s*"?(\d+)/);
+        if (sm) criticsScore = parseInt(sm[1], 10);
+      }
+    }
+    if (audienceObj) {
+      const am = audienceObj[0].match(/"reviewCount"\s*:\s*(\d+)/);
+      if (am) audienceCount = parseInt(am[1], 10);
+      if (audienceScore == null) {
+        const sm = audienceObj[0].match(/"score"\s*:\s*"?(\d+)/);
+        if (sm) audienceScore = parseInt(sm[1], 10);
+      }
+    }
+    return { criticsScore, audienceScore, criticsCount, audienceCount };
   }
 
   /**
@@ -1547,7 +1627,7 @@
 
   // --- Rotten Tomatoes ---
   sources.push({
-    key: 'rottentomatoes', label: '烂番茄', version: 5,
+    key: 'rottentomatoes', label: '烂番茄', version: 6,
     types: ['movie'], requiredConfig: null,
     channels: [
       { channelKey: 'rt_critics', label: '烂番茄 专业', icon: 'https://www.rottentomatoes.com/assets/pizza-pie/images/favicon.ico' },
@@ -1619,30 +1699,20 @@
               return;
             }
             const html = movieResp.responseText;
-            if (validateYear && meta.year) {
+            // v1.1.8: TV 详情页 releaseYear 是 startYear，不能直接拿来跟豆瓣季度年份比；
+            // 跳过 /tv/* 的年份守卫，电影页（/m/*）仍按原逻辑校验 slugMap 是否指向正确年份的片
+            const isTvDetail = /\/tv\//.test(movieUrl);
+            if (validateYear && meta.year && !isTvDetail) {
               const detailYear = extractRtDetailYear(html);
               if (detailYear && !yearWithinOne(detailYear, meta.year)) { onFail(); return; }
             }
-            let criticsScore = null;
-            let audienceScore = null;
-            let criticsCount = null;
-            let audienceCount = null;
 
-            // Method A: JSON in <script type="application/json"> tags
-            const criticsMatch = html.match(/"criticsScore"\s*:\s*(\d+)/);
-            const audienceMatch = html.match(/"audienceScore"\s*:\s*(\d+)/);
-            if (criticsMatch) criticsScore = parseInt(criticsMatch[1], 10);
-            if (audienceMatch) audienceScore = parseInt(audienceMatch[1], 10);
-            const criticsObj = html.match(/"criticsScore"\s*:\s*\{[^}]+\}/);
-            const audienceObj = html.match(/"audienceScore"\s*:\s*\{[^}]+\}/);
-            if (criticsObj) {
-              const cm = criticsObj[0].match(/"reviewCount"\s*:\s*(\d+)/);
-              if (cm) criticsCount = parseInt(cm[1], 10);
-            }
-            if (audienceObj) {
-              const am = audienceObj[0].match(/"reviewCount"\s*:\s*(\d+)/);
-              if (am) audienceCount = parseInt(am[1], 10);
-            }
+            // Method A: JSON in <script type="application/json"> tags（含 TV 页对象形态）
+            const scores = extractRtScores(html);
+            let criticsScore = scores.criticsScore;
+            let audienceScore = scores.audienceScore;
+            const criticsCount = scores.criticsCount;
+            const audienceCount = scores.audienceCount;
 
             // Method B: DOM selectors fallback
             if (criticsScore == null || audienceScore == null) {
@@ -1685,9 +1755,15 @@
             for (let i = 0; i < Math.min(allResults.length, 30); i++) {
               const nameEl = allResults[i].querySelector('a[data-qa="info-name"]');
               if (!nameEl) continue;
+              const row = allResults[i];
               candidates.push({
                 nameNorm: normalizeTitle(nameEl.textContent),
-                year: allResults[i].getAttribute('release-year') || '',
+                year: computeRtCandidateYear(
+                  row.getAttribute('release-year'),
+                  row.getAttribute('startyear'),
+                  row.getAttribute('endyear'),
+                  meta.year
+                ),
                 href: nameEl.getAttribute('href') || '',
               });
             }
@@ -1741,7 +1817,7 @@
 
   // --- Metacritic ---
   sources.push({
-    key: 'metacritic', label: 'Metacritic', version: 8,
+    key: 'metacritic', label: 'Metacritic', version: 9,
     types: ['movie', 'game'], requiredConfig: null,
     channels: [{ channelKey: 'metacritic', label: 'Metacritic', icon: 'https://www.metacritic.com/favicon.ico' }],
     fetch: function (meta, deps) {
@@ -3666,6 +3742,6 @@
 
   // Node 测试钩子：仅导出纯决策函数供单测，绝不触发任何浏览器初始化
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { normalizeTitle, yearWithinOne, pickByYearThenTitle, extractRtDetailYear, earliestReleaseYear, fetchSearchDetail, absolutizeUrl };
+    module.exports = { normalizeTitle, yearWithinOne, pickByYearThenTitle, extractRtDetailYear, extractRtScores, computeRtCandidateYear, earliestReleaseYear, fetchSearchDetail, absolutizeUrl };
   }
 })();
