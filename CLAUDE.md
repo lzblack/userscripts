@@ -16,6 +16,7 @@ Monorepo of standalone browser userscripts (Tampermonkey/Violentmonkey). Each sc
 | `douban-rating-hub/` | Douban (book/movie/music/game pages) | Aggregates ratings from IMDB, Rotten Tomatoes, Metacritic, Letterboxd, TMDB, AniDB, Bangumi, MAL, Goodreads, Amazon, WeChat Reading, and NeoDB. Uses Registry/Strategy pattern with channel-based caching. |
 | `douban-feed-mark/` | Douban (homepage feed) | Shows user's own mark status (想读/在读/已读 etc.) and rating on book/movie/music/game items in the feed. Uses `GM_xmlhttpRequest` to query per-category subdomain interest API with caching. |
 | `x-draggable-tweets/` | X.com / Twitter | Makes tweet cards draggable as real `<a>` links for drag extensions (e.g., Glitter Drag). Reads tweet URLs from DOM and React fiber internals. |
+| `local-time-annotator/` | All pages | Appends the viewer's local time after unambiguous absolute times (`14:42 UTC` → ` (10:42 AM EDT)`), non-destructively. Tier 1 `<time datetime>`, Tier 2 in-text offset markers, Tier 2b timestamps split across inline nodes (e.g. Atlassian Statuspage). DST resolved per-instant by `Intl`; scoped debounced MutationObserver. Pure logic has `node --test` unit tests + `fixture.html`. English UI (global audience). |
 
 ## Development Workflow
 

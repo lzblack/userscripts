@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Local Time Annotator — format zoo</title>
+  <!-- Force a known zone so expected outputs are deterministic regardless of the test machine.
+       ?zone=Asia/Shanghai exercises locales whose short zone name (GMT+8) is itself re-matchable. -->
+  <script>
+    window.__LTA_ZONE__ = new URLSearchParams(location.search).get('zone') || 'America/New_York';
+  </script>
+</head>
+<body>
+  <h1>Local Time Annotator — fixture</h1>
+
+  <section id="tier2-basic">
+    <h2>Tier 2 — zero-ambiguity text (should annotate)</h2>
+    <p id="c1">Standup at 19:00Z sharp.</p>
+    <p id="c2">Deploy window 14:42 UTC on 2026-05-28.</p>
+    <p id="c3">Doors open 2:42 PM GMT (May 28, 2026).</p>
+    <p id="c4">Call at 09:30 UTC+8 on 2026-05-28.</p>
+    <p id="c5">Cutoff 15:00 -05:00, 2026-05-28.</p>
+    <p id="c6">India sync 11:00 GMT+5:30 on 2026-05-28.</p>
+  </section>
+
+  <section id="tier1">
+    <h2>Tier 1 — &lt;time datetime&gt; (should annotate)</h2>
+    <p>Published <time id="t1" datetime="2026-05-28T14:42:00+00:00">a while ago</time>.</p>
+  </section>
+
+  <section id="skip">
+    <h2>Already local (should NOT annotate)</h2>
+    <!-- On 2026-05-28, America/New_York is EDT = -04:00, so this equals local. -->
+    <p id="s1">Local meeting 15:00 -04:00 on 2026-05-28.</p>
+  </section>
+
+  <section id="negatives">
+    <h2>Must NOT match</h2>
+    <p id="n1">The UTC standard governs the GMT zone discussion.</p>
+    <p id="n2">Lunch at 14:00 today, no offset given.</p>
+    <p id="n3">Welcome to 19:00Zen garden, opens soon.</p>
+    <p id="n4">Final score was 25:99 UTC-themed trivia.</p>
+    <p id="n5">A numeric range 15:00 -16:00 in the spreadsheet.</p>
+    <textarea id="n6">Draft: ship at 14:42 UTC tonight.</textarea>
+    <pre id="n7">log: event at 14:42 UTC</pre>
+    <code id="n8">const t = "14:42 UTC";</code>
+  </section>
+
+  <section id="iso-bare">
+    <h2>Bare-text ISO (Tier 1 covers the common case; bare ISO in prose is a known gap)</h2>
+    <p id="iso1">Raw stamp 2026-05-28T14:42:00Z embedded in prose.</p>
+  </section>
+
+  <section id="crossnode">
+    <h2>Tier 2b — cross-node split timestamp (Atlassian Statuspage shape)</h2>
+    <div class="update">
+      <small id="x1">May <var data-var="date">29</var>, <var data-var="time">08:45</var> UTC</small>
+    </div>
+    <div class="update">
+      <small id="x2">May <var data-var="date">29</var>, <var data-var="time">14:00</var> UTC</small>
+    </div>
+    <!-- marker is a direct child of a BLOCK element that has block descendants:
+         must NOT append a trailing annotation (would land after unrelated block content). -->
+    <div id="x3block">deploy at <var>14:42</var> UTC<p>unrelated block child</p></div>
+  </section>
+
+  <section id="dynamic">
+    <h2>Dynamic injection</h2>
+    <div id="inject-target"></div>
+    <button id="inject-btn">inject</button>
+  </section>
+
+  <script>
+    document.getElementById('inject-btn').addEventListener('click', () => {
+      const p = document.createElement('p');
+      p.id = 'dyn1';
+      p.textContent = 'Injected later: webinar 20:00 UTC on 2026-05-28.';
+      document.getElementById('inject-target').appendChild(p);
+    });
+  </script>
+
+  <script src="local-time-annotator.user.js"></script>
+</body>
+</html>
