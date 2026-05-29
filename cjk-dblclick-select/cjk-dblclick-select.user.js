@@ -4,11 +4,11 @@
 // @name:en      CJK Double-Click Phrase Select (Firefox)
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.1.0
+// @version      0.2.0
 // @author       lzblack
-// @description        Restore the pre-ICU4X Firefox double-click behavior for CJK text: double-clicking a Han character selects the contiguous run of CJK ideographs up to the nearest non-CJK boundary (punctuation, space, letters, etc.), instead of just one character. Firefox only — Chrome / Edge / Safari keep their native word-level selection.
-// @description:zh-CN  恢复 Firefox 双击中文的旧行为：双击汉字时选中"连续整段汉字"，直到下一个非汉字边界（标点、空格、字母等）为止。修复 ICU4X 引入的"双击只选单字"回归。仅 Firefox 生效，Chrome / Edge / Safari 保留原生分词。
-// @description:en     Restore the pre-ICU4X Firefox double-click behavior for CJK text: double-clicking a Han character selects the contiguous run of CJK ideographs up to the nearest non-CJK boundary (punctuation, space, letters, etc.), instead of just one character. Firefox only — Chrome / Edge / Safari keep their native word-level selection.
+// @description        Restore the pre-ICU4X Firefox double-click behavior for CJK text: double-clicking a CJK character (Chinese, Japanese kana, Bopomofo, Hangul) selects the contiguous run of CJK characters up to the nearest non-CJK boundary (punctuation, space, Latin letters, etc.), instead of just one character. Firefox only — Chrome / Edge / Safari keep their native word-level selection.
+// @description:zh-CN  恢复 Firefox 双击 CJK 文本的旧行为：双击 CJK 字符（中文、日文假名、注音、谚文）时选中"连续整段 CJK 字符"，直到下一个非 CJK 边界（标点、空格、字母等）为止。修复 ICU4X 引入的"双击只选单字"回归。仅 Firefox 生效，Chrome / Edge / Safari 保留原生分词。
+// @description:en     Restore the pre-ICU4X Firefox double-click behavior for CJK text: double-clicking a CJK character (Chinese, Japanese kana, Bopomofo, Hangul) selects the contiguous run of CJK characters up to the nearest non-CJK boundary (punctuation, space, Latin letters, etc.), instead of just one character. Firefox only — Chrome / Edge / Safari keep their native word-level selection.
 // @match        *://*/*
 // @run-at       document-end
 // @all-frames   true
@@ -24,10 +24,11 @@
  * ----------
  * Pre-ICU4X Firefox treated a double-click on a CJK character as "select the
  * contiguous run of CJK characters up to the nearest punctuation/space". ICU4X
- * replaced that with per-character selection (a single ideograph). This script
+ * replaced that with per-character selection (a single character). This script
  * restores the old behavior: when a dblclick's default selection contains any
- * CJK ideograph, expand the selection outward to the maximal run of contiguous
- * CJK ideographs around the cursor.
+ * CJK character (Han, kana, Bopomofo, Hangul), expand the selection outward to
+ * the maximal run of contiguous CJK characters around the cursor. Japanese
+ * kanji+kana mixes count as one run, so kana no longer breaks a phrase apart.
  *
  * Upstream bug: https://bugzilla.mozilla.org/show_bug.cgi?id=2040746
  * (uninstall this script once that bug is fixed upstream)
@@ -38,6 +39,9 @@
  *   <p>今天天气很好，我们一起去公园吧。</p>        click 好         → 今天天气很好
  *   <p>今天天气很好，我们一起去公园吧。</p>        click 园         → 我们一起去公园吧
  *   <p>Today 今天 is 晴天 weather</p>             click 今         → 今天
+ *   <p>今日はいい天気ですね</p>                    click は         → 今日はいい天気ですね (kanji+kana run)
+ *   <p>東京に行きました。</p>                       click 東         → 東京に行きました
+ *   <p>안녕하세요 반갑습니다</p>                    click 녕         → 안녕하세요 (stops at space)
  *   <p>价格是 100 元整</p>                         click 元         → 元整
  *   <p>The quick brown fox</p>                    click quick      → quick (no CJK, untouched)
  *   <input value="今天天气">                       click 天         → native (form control, skipped)
@@ -53,15 +57,17 @@
     // to single-char selection, and only Firefox is what this script fixes.
     if (!navigator.userAgent.includes("Firefox")) return;
 
-    // Anything outside these ranges is a boundary. CJK punctuation (，。「」),
-    // full-width digits, ASCII, whitespace — all live OUTSIDE these ranges,
-    // so they naturally act as boundaries without a hand-maintained list.
+    // A "CJK character" is any Han ideograph, Japanese kana, Bopomofo, or Hangul,
+    // plus the iteration / long-vowel marks that live inside CJK runs but carry
+    // Script=Common (々ー〆 etc.). \p{Script=Han} covers every ideograph plane
+    // (basic, Ext A–F, compatibility) without a hand-maintained range list, so
+    // supplementary-plane characters work for free. Everything else — CJK
+    // punctuation (，。「」), full-width digits, ASCII, whitespace, Emoji —
+    // falls outside and therefore acts as a boundary with no allowlist to keep.
+    const CJK_CHAR_RE =
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}\p{Script=Hangul}々〆〇ヶヵー]/u;
     function isCJKCodePoint(cp) {
-        return (
-            (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK Unified Ideographs
-            (cp >= 0x3400 && cp <= 0x4DBF) ||  // Extension A
-            (cp >= 0x20000 && cp <= 0x2A6DF)   // Extension B (surrogate pair in UTF-16)
-        );
+        return CJK_CHAR_RE.test(String.fromCodePoint(cp));
     }
 
     function containsCJK(s) {
@@ -236,7 +242,7 @@
         const text = caret.node.data;
         const offset = caret.offset;
 
-        // Require that at least one side of the caret is a CJK ideograph.
+        // Require that at least one side of the caret is a CJK character.
         // Without this, a click that lands on whitespace between CJK runs
         // would still trigger expansion in an unintuitive direction.
         const right = offset < text.length ? text.codePointAt(offset) : null;
