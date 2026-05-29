@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-29
+
+### Changed
+- 覆盖范围从「仅汉字」扩展到完整 CJK：在 Han 之外纳入日文假名（平假名/片假名）、注音符号、谚文，以及连写于 CJK 段内的迭代/长音记号（`々ー〆〇ヶヵ`）。日文「汉字+假名」混排现在视为同一段，假名不再断句；韩文双击选到空格为止（正好一个词）
+- 边界判定由硬编码码点区间改为 Unicode `\p{Script=...}` 属性正则。`\p{Script=Han}` 自动覆盖全部表意字平面（基本区、扩展 A–F、兼容区），不再只到扩展 B，且无需手维护区间表
+
 ## [0.1.0] - 2026-05-19
 
 ### Added
