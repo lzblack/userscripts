@@ -1,10 +1,4 @@
-<!--
-GreasyFork 附加信息（多语言）。GreasyFork 的「附加信息」按站点语言分版本展示：
-把下面 ===== 分隔的三段分别粘贴到 GreasyFork 对应语言（中文 / 日本語 / English）的输入框。
-每段都自包含，可独立粘贴。
--->
-
-===== 中文（简体）=====
+# 中文（简体）
 
 恢复 Firefox 双击 CJK 文本（中文、日文、韩文）的旧行为。Firefox 自 116 切换到 ICU4X 后，双击一个 CJK 字符只会选中**单个字**（如双击「今」只选「今」），过去那种"选中连续整段"的体验没了。这个脚本把老行为还回来。
 
@@ -49,14 +43,9 @@ GreasyFork 附加信息（多语言）。GreasyFork 的「附加信息」按站�
 
 [提交 Issue](https://github.com/lzblack/userscripts/issues)。完整说明 / 算法细节 / 测试用例见 [GitHub README](https://github.com/lzblack/userscripts/tree/main/cjk-dblclick-select)；更新日志：[CHANGELOG](https://github.com/lzblack/userscripts/blob/main/cjk-dblclick-select/CHANGELOG.md)。
 
-## 同作者的其他脚本
+---
 
-- [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 豆瓣全品类评分聚合（16 个平台 + 榜单胶囊）
-- [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
-- [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一本书的其他版本
-- [豆瓣广播标记助手](https://greasyfork.org/zh-CN/scripts/572857) — 在首页广播流中显示你的书影音游标记状态和评分
-
-===== 日本語 =====
+# 日本語
 
 ICU4X 導入前の Firefox における CJK テキストのダブルクリック動作を復元します。Firefox 116 で ICU4X に切り替わって以降、CJK 文字をダブルクリックしても**1 文字しか選択されず**（例：「今」をダブルクリックすると「今」だけ）、かつての「連続したまとまりを選択する」挙動が失われました。このスクリプトは旧来の挙動を取り戻します。
 
@@ -101,7 +90,9 @@ Mozilla Bugzilla に報告済み：[Bug 2040746](https://bugzilla.mozilla.org/sh
 
 [Issue を提出](https://github.com/lzblack/userscripts/issues)。詳細・アルゴリズム・テストケースは [GitHub README](https://github.com/lzblack/userscripts/tree/main/cjk-dblclick-select)、更新履歴は [CHANGELOG](https://github.com/lzblack/userscripts/blob/main/cjk-dblclick-select/CHANGELOG.md) を参照。
 
-===== English =====
+---
+
+# English
 
 Restore the pre-ICU4X Firefox double-click behavior for CJK text (Chinese, Japanese, Korean). Since Firefox 116 switched to ICU4X, double-clicking a CJK character selects **only a single character** (e.g. double-clicking 今 selects just 今), losing the old "select the whole contiguous run" behavior. This script brings the old behavior back.
 
@@ -145,3 +136,12 @@ Reported on Mozilla Bugzilla: [Bug 2040746](https://bugzilla.mozilla.org/show_bu
 ## Feedback
 
 [Open an issue](https://github.com/lzblack/userscripts/issues). Full docs / algorithm / test cases: [GitHub README](https://github.com/lzblack/userscripts/tree/main/cjk-dblclick-select); changelog: [CHANGELOG](https://github.com/lzblack/userscripts/blob/main/cjk-dblclick-select/CHANGELOG.md).
+
+---
+
+## 同作者的其他脚本 / 同じ作者の他のスクリプト / Other scripts
+
+- [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 豆瓣全品类评分聚合（16 个平台 + 榜单胶囊）
+- [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
+- [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一本书的其他版本
+- [豆瓣广播标记助手](https://greasyfork.org/zh-CN/scripts/572857) — 在首页广播流中显示你的书影音游标记状态和评分
