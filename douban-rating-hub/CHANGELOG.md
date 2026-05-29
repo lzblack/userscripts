@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-05-28
+
+### Fixed
+- **条目子页误注入评分面板**（用户报告：[1304022 的相册页](https://movie.douban.com/subject/1304022/all_photos) 也出现了评分）：`@match .../subject/*` 会匹配 `/subject/{id}/all_photos`、`/comments` 等所有子页；`init()` 原有黑名单写的是 `/photos`，而豆瓣相册页路径是 `/all_photos`（`photos` 前是下划线非斜杠），`indexOf('/photos')` 命中不到，守卫失效。改用白名单：路径必须精确匹配条目主页根 `/(subject|game|location/drama|podcast)/\d+/?` 才运行，子页一律不注入，一劳永逸覆盖 `/all_reviews`、`/questions`、`/cinema/` 等所有子页。
+
 ## [1.1.8] - 2026-05-28
 
 ### Fixed

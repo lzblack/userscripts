@@ -1,8 +1,10 @@
 // ==UserScript==
 // @name         豆瓣评分汇 | Douban Rating Hub
+// @author       lzblack
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.8
+// @supportURL   https://github.com/lzblack/userscripts/issues
+// @version      1.1.9
 // @description  豆瓣全品类（电影、剧集、图书、音乐、游戏、播客）评分聚合 — IMDB、烂番茄、Letterboxd、Goodreads、Trakt 等 17 个平台；在 title 上方显示外部权威榜单胶囊
 // @match        https://book.douban.com/subject/*
 // @match        https://movie.douban.com/subject/*
@@ -3680,12 +3682,9 @@
     const meta = extractMeta();
     if (meta.type === 'unknown' || !meta.doubanId) return;
 
-    // 排除非条目主页路径
-    const excludedPaths = ['/doulists', '/photos', '/discussion', '/reviews', '/comments', '/collections'];
-    const path = location.pathname;
-    for (let i = 0; i < excludedPaths.length; i++) {
-      if (path.indexOf(excludedPaths[i]) !== -1) return;
-    }
+    // 仅在条目主页根路径运行，排除 /all_photos、/comments、/reviews 等所有子页
+    const isRootPage = /^\/(?:subject|game|location\/drama|podcast)\/\d+\/?$/.test(location.pathname);
+    if (!isRootPage) return;
 
     const config = readConfig();
     const applicable = getApplicableSources(meta.type, config, meta);
