@@ -1,12 +1,17 @@
 // ==UserScript==
 // @name         Local Time Annotator
 // @namespace    https://github.com/lzblack/userscripts
+// @homepageURL  https://github.com/lzblack/userscripts
 // @version      0.1.0
-// @description  Append local time after unambiguous absolute times on any page (e.g. "14:42 UTC" -> " (10:42 AM EDT)").
-// @author       Zhi
+// @author       lzblack
+// @description  Append your local time after unambiguous absolute times on any page (e.g. "14:42 UTC" -> " (10:42 AM EDT)"), non-destructively.
 // @match        *://*/*
 // @run-at       document-idle
 // @grant        none
+// @license      MIT
+// @supportURL   https://github.com/lzblack/userscripts/issues
+// @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/local-time-annotator/local-time-annotator.user.js
+// @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/local-time-annotator/local-time-annotator.user.js
 // ==/UserScript==
 
 (function () {
