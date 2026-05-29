@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-29
+
+### Added
+- 日语本地化：补 `@name:ja` / `@description:ja`，日文用户在 Tampermonkey / GreasyFork 列表看到日语标题与描述（此前回退到英文）
+- GreasyFork 说明改为中日英三语正文（韩文支持在正文内一句话说明）
+
 ## [0.2.1] - 2026-05-29
 
 ### Fixed
