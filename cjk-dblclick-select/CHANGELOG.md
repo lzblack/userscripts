@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-29
+
+### Fixed
+- 嵌套 block 阻断失效：跨节点遍历此前用 `FILTER_REJECT` 跳过嵌套 block 内的文本，但「跳过」不等于「停止」——遍历会越过 block 继续合并另一侧的同级文本。如 `<div>今天<div>新段落</div>剩余</div>` 双击「余」会错选成 `今天新段落剩余`。改为遇到 block 边界即停止遍历，现在正确只选 `剩余`
+
 ## [0.2.0] - 2026-05-29
 
 ### Changed
