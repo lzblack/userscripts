@@ -16,7 +16,7 @@
 ## 安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/)（Firefox 推荐 Violentmonkey）
-2. 从 [GreasyFork](https://greasyfork.org/zh-CN/scripts/) 安装本脚本
+2. 从 [GreasyFork](https://greasyfork.org/zh-CN/scripts/578908) 安装本脚本
 3. 任意网页上双击 CJK 字符即可生效，无需配置
 
 > **Chrome / Edge / Safari 用户**：脚本会在启动时自检 UA，若不是 Firefox 直接 no-op，**不会影响**你浏览器原生的分词选择行为。装上也无害。
