@@ -1,5 +1,3 @@
-# English
-
 Appends **your** local time after any unambiguous absolute time on a web page — non-destructively, inline, on any site.
 
 ```
@@ -42,4 +40,3 @@ A cheap pre-test gates the page scan, formatters are cached, and DOM writes are 
 
 - [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — all-category rating aggregator for Douban (16 platforms)
 - [CJK Double-Click Phrase Select (Firefox)](https://greasyfork.org/zh-CN/scripts/578908) — restore whole-run CJK selection on double-click
-- [X.com Draggable Tweets](https://github.com/lzblack/userscripts/tree/main/x-draggable-tweets) — make tweet cards draggable as real links
