@@ -92,5 +92,11 @@
   <p>안녕하세요 반갑습니다</p>
   预期：双击 <code>안녕하세요</code> 内任意字 → <code>안녕하세요</code>（停在空格，正好一个词）
 </div>
+
+<div class="case">
+  <b>14. &lt;br&gt; 换行即边界（裸文本节点 + br，仿 Vue 组件结构）</b><br>
+  <div>睡沙发的人<br><br>讲中国高考问题的，说实话，我挺震惊的<br><br>我以为都是短剧风</div>
+  预期：双击 <code>睡沙发的人</code> 任意字 → <code>睡沙发的人</code>（向右不越过 <code>br</code>）；双击 <code>讲</code> → <code>讲中国高考问题的</code>（向左不越过 <code>br</code> 吸回上一行）
+</div>
 </body>
 </html>

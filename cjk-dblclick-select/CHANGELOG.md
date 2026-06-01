@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-01
+
+### Fixed
+- `<br>` 换行未作边界：跨节点遍历此前只看文本节点（`SHOW_TEXT`），`<br>` 被直接跳过，双击会越过换行并入下一行文本。如 `<div>睡沙发的人<br><br>讲中国高考问题的，…</div>` 双击「睡沙发的人」会错选成 `睡沙发的人\n\n讲中国高考问题的`。改为 `SHOW_TEXT | SHOW_ELEMENT`，遇到 `<br>` 或任何非 inline 显示的兄弟元素（`<hr>`、空块级元素等）即停止遍历——与既有的嵌套 block 阻断同一套边界语义
+
 ## [0.2.2] - 2026-05-29
 
 ### Added
