@@ -5,7 +5,7 @@
 // @name:en      CJK Double-Click Phrase Select (Firefox)
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.2.2
+// @version      0.2.3
 // @author       lzblack
 // @description        Restore the pre-ICU4X Firefox double-click behavior for CJK text: double-clicking a CJK character (Chinese, Japanese kana, Bopomofo, Hangul) selects the contiguous run of CJK characters up to the nearest non-CJK boundary (punctuation, space, Latin letters, etc.), instead of just one character. Firefox only — Chrome / Edge / Safari keep their native word-level selection.
 // @description:zh-CN  恢复 Firefox 双击 CJK 文本的旧行为：双击 CJK 字符（中文、日文假名、注音、谚文）时选中"连续整段 CJK 字符"，直到下一个非 CJK 边界（标点、空格、字母等）为止。修复 ICU4X 引入的"双击只选单字"回归。仅 Firefox 生效，Chrome / Edge / Safari 保留原生分词。
@@ -49,6 +49,7 @@
  *   <input value="今天天气">                       click 天         → native (form control, skipped)
  *   <p><span>今天</span><span>天气很好</span></p>  click 好         → 今天天气很好 (crosses spans)
  *   <p>今天<div>新段落</div>剩余</p>               click 余         → 剩余 (stops at nested block)
+ *   <div>第一行<br><br>第二行</div>                 click 行(1st)    → 第一行 (stops at <br>; never merges across line break)
  */
 
 (function () {
@@ -142,6 +143,15 @@
         return true;
     }
 
+    // A <br> or any non-inline sibling element encountered mid-walk is a visual
+    // line/block break: stop, never merge across it. <br> computes to
+    // display:inline, so the nodeName test must come BEFORE the display test.
+    function isBoundaryElement(el) {
+        if (el.nodeName === "BR") return true;
+        const d = window.getComputedStyle(el).display;
+        return d && !d.startsWith("inline") && d !== "contents";
+    }
+
     // Walk left across text nodes within the block ancestor. In real Chinese
     // text the run is bounded by punctuation within ~dozens of chars, so an
     // unbounded walk is fine; no cap is enforced.
@@ -150,11 +160,15 @@
         let startNode = anchorNode;
         let startOffset = walkLeftInNode(anchorNode, anchorOffset);
         if (startOffset > 0) return { node: startNode, offset: startOffset };
-        const tw = anchorNode.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+        const tw = anchorNode.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
         tw.currentNode = anchorNode;
         while (startOffset === 0) {
             const prev = tw.previousNode();
             if (!prev) break;
+            if (prev.nodeType === Node.ELEMENT_NODE) {
+                if (isBoundaryElement(prev)) break;
+                continue;
+            }
             if (!isInlineWithin(prev, block)) break;
             const len = prev.data.length;
             if (len === 0) { startNode = prev; continue; }
@@ -171,11 +185,15 @@
         let endNode = anchorNode;
         let endOffset = walkRightInNode(anchorNode, anchorOffset);
         if (endOffset < anchorNode.data.length) return { node: endNode, offset: endOffset };
-        const tw = anchorNode.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+        const tw = anchorNode.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
         tw.currentNode = anchorNode;
         while (endOffset === endNode.data.length) {
             const next = tw.nextNode();
             if (!next) break;
+            if (next.nodeType === Node.ELEMENT_NODE) {
+                if (isBoundaryElement(next)) break;
+                continue;
+            }
             if (!isInlineWithin(next, block)) break;
             const len = next.data.length;
             if (len === 0) { endNode = next; endOffset = 0; continue; }
