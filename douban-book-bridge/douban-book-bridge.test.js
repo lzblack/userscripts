@@ -12,6 +12,7 @@ const {
   mapBinding,
   normalizeTitle,
   parsePageCount,
+  cleanDescription,
   isPayloadFresh,
   bindingRadioValue,
   buildFillPlan,
@@ -138,6 +139,15 @@ test('parsePageCount: extracts integer, strips commas', () => {
   assert.equal(parsePageCount('no number'), null);
 });
 
+// ── cleanDescription ────────────────────────────────────────────────────────
+test('cleanDescription: strips trailing Read more/less toggle', () => {
+  assert.equal(cleanDescription('A great book. Read more'), 'A great book.');
+  assert.equal(cleanDescription('A great book. Read less'), 'A great book.');
+  assert.equal(cleanDescription('A great book.'), 'A great book.');
+  assert.equal(cleanDescription('  spaced  '), 'spaced');
+  assert.equal(cleanDescription(''), '');
+});
+
 // ── isPayloadFresh ──────────────────────────────────────────────────────────
 test('isPayloadFresh: TTL window', () => {
   const ttl = 600000;
@@ -163,17 +173,18 @@ test('buildFillPlan: happy path maps every fillable field', () => {
   assert.equal(byLabel['定价'], 'USD 27.63');
   assert.equal(byLabel['出版社'], 'Harper');
   assert.equal(byLabel['页数'], '464');
-  assert.equal(plan.author, 'Yuval Noah Harari');
+  assert.deepEqual(plan.authors, ['Yuval Noah Harari']);
   assert.deepEqual(plan.date, { y: 2015, m: 2, d: 10 });
   assert.deepEqual(plan.binding, { radioValue: 'Hardcover', otherText: '' });
   assert.equal(plan.textareas.find((a) => a.label === '内容简介').value, 'Long description here.');
   assert.deepEqual(plan.warnings, []);
 });
 
-test('buildFillPlan: multi-author warns with remaining count', () => {
+test('buildFillPlan: all authors carried for auto-add, no manual warning', () => {
   const plan = buildFillPlan({ ...SAPIENS, authors: ['A Author', 'B Author', 'C Author'] });
-  assert.equal(plan.author, 'A Author');
-  assert.ok(plan.warnings.some((w) => /还有 2 位作者/.test(w)));
+  assert.deepEqual(plan.authors, ['A Author', 'B Author', 'C Author']);
+  assert.deepEqual(plan.warnings, []);
+  assert.ok(plan.filled.includes('作者 ×3'));
 });
 
 test('buildFillPlan: missing required fields produce warnings, not throws', () => {
