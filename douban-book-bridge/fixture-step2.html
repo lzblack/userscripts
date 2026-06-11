@@ -1,0 +1,138 @@
+<!doctype html>
+<!-- 豆瓣 /new_subject 第二步页的精简真实结构（来自实页 DOM），用于回填器手测/验证。
+     年份下拉裁剪为 2010–2026（含 Sapiens 的 2015）；其余结构与线上一致。
+     末尾保留 report-press-err 表单，用于验证 fieldByLabel 只命中 form.detail_form。 -->
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>添加 Sapiens</title></head>
+<body>
+<div id="content">
+  <h1>添加 Sapiens</h1>
+  <div class="grid-16-8 clearfix">
+    <div class="article">
+      <form action="/new_subject" method="POST" class="detail_form">
+        <fieldset>
+          <div class="item basic ">
+            <label for="p_2">书名</label>
+            <input type="text" id="p_2" name="p_2" value="Sapiens" class="input_basic modified" maxlength="256" autocomplete="off">
+            <input type="hidden" name="p_2">
+            <span class="tip">书名只应填写正标题，副标题填在下栏</span>
+          </div>
+          <div class="item basic ">
+            <label for="p_42">副标题</label>
+            <input type="text" id="p_42" name="p_42" value="" class="input_basic" maxlength="256" autocomplete="off">
+            <input type="hidden" name="p_42">
+          </div>
+          <div class="item basic ">
+            <label for="p_98">原作名</label>
+            <input type="text" id="p_98" name="p_98" value="" class="input_basic" maxlength="256" autocomplete="off">
+            <input type="hidden" name="p_98">
+          </div>
+          <div class="item basic ">
+            <label for="p_9">ISBN</label>
+            <input type="text" id="p_9" name="p_9" value="" class="input_basic  s locked" readonly="readonly">
+            <input type="hidden" name="p_9">
+          </div>
+          <div class="item list authors">
+            <label for="p_5"><span class="required">*</span>作者</label>
+            <ul><li class="">
+              <input type="text" id="p_5_0" name="p_5" class="input_basic" maxlength="256" autocomplete="off">
+              <input type="text" data-id="p_5_0" name="a_5" class="input_basic s" autocomplete="off">
+              <a href="" class="add">+</a>
+            </li></ul>
+          </div>
+          <div class="item list authors">
+            <label for="p_41">译者</label>
+            <ul><li class="">
+              <input type="text" id="p_41_0" name="p_41" class="input_basic" maxlength="256" autocomplete="off">
+              <input type="text" data-id="p_41_0" name="a_41" class="input_basic s" autocomplete="off">
+              <a href="" class="add">+</a>
+            </li></ul>
+          </div>
+          <div class="item basic ">
+            <label for="p_8">定价</label>
+            <input type="text" id="p_8" name="p_8" value="" class="input_basic" maxlength="256" autocomplete="off">
+            <input type="hidden" name="p_8">
+            <span class="tip">如 25.00 元 或 USD 30.00</span>
+          </div>
+          <div class="item basic ">
+            <label for="p_6">出版社</label>
+            <input type="text" id="p_6" name="p_6" value="" class="input_basic" maxlength="256" autocomplete="off">
+            <input type="hidden" name="p_6">
+          </div>
+          <div class="item list" id="press">
+            <label for="p_148">出品方</label>
+            <ul><li>
+              <input type="text" id="p_148_0" name="p_148" class="input_basic " maxlength="256" autocomplete="off">
+              <a href="" class="add">+</a>
+            </li></ul>
+          </div>
+          <div class="item date">
+            <label for="p_7">出版日期</label>
+            <input name="p_7" id="p_7" type="hidden" value="" style="display: none;">
+            <select id="p_7_selectYear">
+              <option value="2026">2026</option><option value="2025">2025</option><option value="2024">2024</option>
+              <option value="2023">2023</option><option value="2022">2022</option><option value="2021">2021</option>
+              <option value="2020">2020</option><option value="2019">2019</option><option value="2018">2018</option>
+              <option value="2017">2017</option><option value="2016">2016</option><option value="2015">2015</option>
+              <option value="2014">2014</option><option value="2013">2013</option><option value="2012">2012</option>
+              <option value="2011">2011</option><option value="2010">2010</option>
+            </select><span>&nbsp;年&nbsp;</span>
+            <select id="p_7_selectMonth">
+              <option value="">无</option><option value="1"> 1</option><option value="2">2</option><option value="3">3</option>
+              <option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option>
+              <option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option>
+              <option value="12">12</option>
+            </select><span>&nbsp;月&nbsp;</span>
+            <select id="p_7_selectDay"><option value="">无</option></select><span>&nbsp;日&nbsp;</span>
+          </div>
+          <div class="item single">
+            <label for="p_58">装帧</label>
+            <label for="p_58_0" class="sub"><input type="radio" id="p_58_0" value="平装" name="p_58">平装</label>
+            <label for="p_58_1" class="sub"><input type="radio" id="p_58_1" value="精装" name="p_58">精装</label>
+            <label for="p_58_2" class="sub"><input type="radio" id="p_58_2" value="Paperback" name="p_58">Paperback</label>
+            <label for="p_58_3" class="sub"><input type="radio" id="p_58_3" value="Hardcover" name="p_58">Hardcover</label>
+            <label for="p_58_4" class="sub"><input type="radio" id="p_58_4" name="p_58" value="other">其他:</label>
+            <input type="text" id="p_58_other" name="p_58_other" value="" class="input_basic other" maxlength="256" autocomplete="off">
+          </div>
+          <div class="item basic ">
+            <label for="p_10">页数</label>
+            <input type="text" id="p_10" name="p_10" value="" class="input_basic brief" maxlength="256" autocomplete="off">
+            <input type="hidden" name="p_10">页
+          </div>
+          <div class="item text section">
+            <label for="p_3"><span class="required">*</span>内容简介</label>
+            <ul><li><div class="text-con unique ">
+              <textarea name="p_3_other" class="textarea_basic"></textarea>
+            </div></li></ul>
+          </div>
+          <div class="item text section">
+            <label for="p_40">作者简介</label>
+            <ul><li><div class="text-con unique ">
+              <textarea name="p_40_other" class="textarea_basic"></textarea>
+            </div></li></ul>
+          </div>
+          <div class="item text section">
+            <label for="p_99">目录</label>
+            <ul><li><div class="text-con unique ">
+              <textarea name="p_99_other" class="textarea_basic"></textarea>
+            </div></li></ul>
+          </div>
+          <div class="submit-item">
+            <input name="cat" type="hidden" value="1001">
+            <input name="p_uid" type="hidden" id="uid" value="978-0062316097">
+            <input type="hidden" name="search_text" value="Sapiens">
+            <p><input type="submit" name="detail_subject_submit" value="下一步" class="submit"> <a href="/">取消</a></p>
+          </div>
+        </fieldset>
+      </form>
+
+      <!-- 干扰项：报错表单也有 ISBN / 出版社 label，fieldByLabel 必须只命中 detail_form -->
+      <form method="POST" class="report-err" id="report-press-err">
+        <div class="item basic"><label>ISBN</label><input type="text" name="isbn" value="None" class="locked" readonly=""></div>
+        <div class="item basic"><label>出版社</label><input type="text" name="press"></div>
+      </form>
+    </div>
+  </div>
+</div>
+</body>
+</html>
