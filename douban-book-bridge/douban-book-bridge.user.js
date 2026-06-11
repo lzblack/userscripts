@@ -9,6 +9,8 @@
 // @match        https://www.amazon.com/*
 // @match        https://book.douban.com/new_subject*
 // @connect      book.douban.com
+// @connect      media-amazon.com
+// @connect      ssl-images-amazon.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -210,6 +212,7 @@
   // ============================================================
 
   const STORAGE_KEY = 'dbb:pending';
+  const COVER_KEY = 'dbb:cover';
   const TTL_MS = 10 * 60 * 1000;
   const NEW_SUBJECT_BASE = 'https://book.douban.com/new_subject';
 
@@ -223,6 +226,7 @@
           url,
           headers: opts.headers || {},
           timeout: opts.timeout || 15000,
+          responseType: opts.responseType || undefined,
           anonymous: opts.anonymous === true,
           onload: resolve,
           onerror: () => reject(new Error('request failed: ' + url)),
@@ -237,6 +241,11 @@
     return String(input == null ? '' : input)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function safeLinkUrl(input) {
+    const url = String(input == null ? '' : input).trim();
+    return /^https?:\/\//i.test(url) ? url : '#';
   }
 
   /** 清洗 Amazon 详情里的方向控制符与冒号噪声，折叠空白。 */
@@ -745,10 +754,60 @@
     injectSummary(root, plan);
     highlightSubmit(root);
 
-    GM_deleteValue(STORAGE_KEY); // 消费即删
+    // 把封面单独交棒给下一页（上传封面页）。主 payload 在此消费即删，
+    // 既保留封面、又不会在第二步重载时重复回填覆盖用户编辑。
+    if (payload.coverUrl) {
+      GM_setValue(COVER_KEY, JSON.stringify({ coverUrl: payload.coverUrl, source: { capturedAt: Date.now() } }));
+    }
+    GM_deleteValue(STORAGE_KEY);
+  }
+
+  /** 上传封面页：拉 Amazon 封面 blob，DataTransfer 注入 file input。不自动提交。 */
+  async function runCoverUpload(fileInput) {
+    let info = null;
+    const raw = GM_getValue(COVER_KEY);
+    if (raw) {
+      try {
+        const c = JSON.parse(raw);
+        if (isPayloadFresh(c, Date.now(), TTL_MS) && c.coverUrl) info = c;
+        else GM_deleteValue(COVER_KEY);
+      } catch { GM_deleteValue(COVER_KEY); }
+    }
+    if (!info) return; // 用户正常手动上传，不干预
+
+    GM_deleteValue(COVER_KEY); // 消费即删（无论成败，避免污染下一本）
+    try {
+      const resp = await deps.request(info.coverUrl, { anonymous: true, responseType: 'blob' });
+      const blob = resp.response;
+      if (!blob || !blob.size) throw new Error('empty blob');
+      const ext = (blob.type && blob.type.split('/')[1]) || 'jpg';
+      const file = new File([blob], `cover.${ext}`, { type: blob.type || 'image/jpeg' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      injectCoverBanner(fileInput, true, info.coverUrl);
+    } catch {
+      injectCoverBanner(fileInput, false, info.coverUrl);
+    }
+  }
+
+  function injectCoverBanner(fileInput, ok, coverUrl) {
+    const form = fileInput.closest('form') || fileInput.parentElement;
+    const submit = form.querySelector('input[name="img_submit"], input[type="submit"]');
+    if (ok && submit) submit.style.boxShadow = '0 0 0 3px rgba(46,125,50,.6)';
+    injectBanner(
+      form,
+      ok
+        ? `<b style="color:#2e7d32">封面已就绪</b>（来自 Amazon）— 请核对后点「上传图片」。`
+        : `<b style="color:#c0392b">封面自动获取失败</b> — 可<a href="${escapeHtml(safeLinkUrl(coverUrl))}" target="_blank" rel="noopener">打开原图</a>手动选择，或点「跳过」。`
+    );
   }
 
   function runDouban() {
+    const fileInput = document.querySelector('form.fileupload input[name="picfile"]');
+    if (fileInput) { runCoverUpload(fileInput); return; }
+
     const form = document.querySelector('form.detail_form');
     if (!form) return;
 
