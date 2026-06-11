@@ -215,9 +215,45 @@
     return rows;
   }
 
+  /** 现代 "Rich Product Information" 卡片布局：值在 .rpi-attribute-value，必须用 textContent
+   *  （轮播里离屏卡片 innerText 为空）。归一成与旧布局一致的 {label,value} 行。 */
+  function rpiRows() {
+    const map = [
+      ['ISBN-13', 'isbn13'],
+      ['ISBN-10', 'isbn10'],
+      ['Publisher', 'publisher'],
+      ['Publication date', 'publication_date'],
+      ['Print length', 'fiona_pages'],
+    ];
+    const rows = [];
+    for (const [label, key] of map) {
+      const el = document.getElementById('rpi-attribute-book_details-' + key);
+      const v = el && el.querySelector('.rpi-attribute-value');
+      if (v) {
+        const value = cleanLabel(v.textContent);
+        if (value) rows.push({ label, value });
+      }
+    }
+    return rows;
+  }
+
   function detailValue(rows, labelRe) {
     const row = rows.find((r) => labelRe.test(r.label));
     return row ? row.value : '';
+  }
+
+  const BINDING_RE = /^(Hardcover|Paperback|Kindle Edition|Kindle|Board book|Mass Market Paperback|Audiobook|Spiral-bound|Library Binding)$/i;
+
+  /** 当前版本的装帧：rpi 布局放在 #bylineInfo 的叶子节点；旧布局在 #productSubtitle。 */
+  function extractBindingRaw() {
+    const byline = document.querySelector('#bylineInfo');
+    if (byline) {
+      const n = [...byline.querySelectorAll('span, a')].find(
+        (e) => e.children.length === 0 && BINDING_RE.test(e.textContent.trim())
+      );
+      if (n) return n.textContent.trim();
+    }
+    return firstText(['#productSubtitle', '#tmmSwatches .selected', '.swatchElement.selected']);
   }
 
   function extractAuthors() {
@@ -245,7 +281,7 @@
 
   /** 从 Amazon 图书页提取 canonical payload；ISBN 无效则 isbn13=null（调用方据此阻断）。 */
   function extractAmazonPayload() {
-    const rows = amazonDetailRows();
+    const rows = [...amazonDetailRows(), ...rpiRows()];
     const productTitle = (document.querySelector('#productTitle')?.textContent || '').trim();
     const { title, subtitle } = splitTitle(productTitle);
 
@@ -261,19 +297,22 @@
     const pub = splitPublisherDate(detailValue(rows, /^publisher/i));
     const pubDate = pub.date || parseDate(detailValue(rows, /publication date/i));
 
-    const bindingSubtitle = firstText(['#productSubtitle', '#tmmSwatches .selected', '.swatchElement.selected']);
-    const binding = mapBinding(bindingSubtitle);
+    const pageRow = rows.find((r) => /\d+\s*pages/i.test(r.value) || /print length/i.test(r.label));
 
+    const bindingRaw = extractBindingRaw();
+    const binding = mapBinding(bindingRaw);
+
+    // 仅取 buybox 当前版本价；不用通用 .a-offscreen（会抓到其他版本/Kindle 的最低价）。
     const price = normalizePrice(
       firstText([
-        '#tmmSwatches .selected .a-color-price',
-        '#tmmSwatches .selected .slot-price',
-        '#price',
-        '.a-price .a-offscreen',
+        '#corePriceDisplay_desktop_feature_div span.a-price span.a-offscreen',
+        '#corePrice_feature_div span.a-price span.a-offscreen',
+        '#price_inside_buybox',
+        '#tmmSwatches .a-button-selected .a-color-price',
       ])
     );
 
-    const description = firstText(['#bookDescription_expander', '#bookDescription_feature_div']);
+    const description = firstText(['#bookDescription_feature_div', '#bookDescription_expander']);
     const authorBio = firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
     const coverEl = document.querySelector('#landingImage, #imgBlkFront');
     const coverUrl = coverEl ? coverEl.getAttribute('data-old-hires') || coverEl.getAttribute('src') || '' : '';
@@ -285,9 +324,9 @@
       isbn13: isbn13 || null,
       publisher: pub.publisher || '',
       pubDate: pubDate || { y: null, m: null, d: null },
-      pageCount: parsePageCount(detailValue(rows, /print length|paperback|hardcover|pages/i)),
+      pageCount: parsePageCount(pageRow ? pageRow.value : ''),
       binding,
-      bindingRaw: cleanLabel(bindingSubtitle),
+      bindingRaw: cleanLabel(bindingRaw),
       price: price || null,
       description: description || '',
       authorBio: authorBio || '',
