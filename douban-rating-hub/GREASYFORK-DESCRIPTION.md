@@ -58,3 +58,4 @@ NeoDB
 - [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
 - [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一本书的其他版本
 - [豆瓣广播标记助手](https://greasyfork.org/zh-CN/scripts/572857) — 在首页广播流中显示你的书影音游标记状态和评分
+- [豆瓣一键添书](https://greasyfork.org/zh-CN/scripts/582130) — 在 Amazon 图书页一键把书加进豆瓣（查重 + 自动回填 + 封面）

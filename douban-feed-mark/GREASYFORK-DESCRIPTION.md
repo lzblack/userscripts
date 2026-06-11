@@ -46,3 +46,4 @@
 - [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 聚合 IMDB、烂番茄、Letterboxd、Goodreads 等 16 个平台的评分
 - [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
 - [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一本书的其他版本
+- [豆瓣一键添书](https://greasyfork.org/zh-CN/scripts/582130) — 在 Amazon 图书页一键把书加进豆瓣（查重 + 自动回填 + 封面）
