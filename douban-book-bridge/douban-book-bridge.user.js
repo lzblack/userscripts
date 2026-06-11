@@ -129,6 +129,11 @@
     return m ? Number(m[0]) : null;
   }
 
+  /** 剥掉 Amazon 简介尾部的展开切换文案（"Read more" / "Read less"）。 */
+  function cleanDescription(input) {
+    return String(input == null ? '' : input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
+  }
+
   /** payload 是否在 TTL 窗口内（now - capturedAt < ttl）。 */
   function isPayloadFresh(payload, now, ttl) {
     const at = payload && payload.source && payload.source.capturedAt;
@@ -165,11 +170,9 @@
     pushText('出版社', p.publisher);
     pushText('页数', p.pageCount != null ? String(p.pageCount) : '');
 
-    const authors = Array.isArray(p.authors) ? p.authors : [];
-    const author = authors[0] || '';
-    if (author) filled.push('作者');
+    const authors = (Array.isArray(p.authors) ? p.authors : []).filter(Boolean);
+    if (authors.length) filled.push(authors.length > 1 ? `作者 ×${authors.length}` : '作者');
     else { skipped.push('作者'); warnings.push('缺作者（豆瓣必填）'); }
-    if (authors.length > 1) warnings.push(`还有 ${authors.length - 1} 位作者需手动点 + 添加`);
 
     const textareas = [];
     const pushArea = (label, value, required) => {
@@ -189,14 +192,14 @@
     filled.push('装帧');
     if (radioValue === 'other') warnings.push(`装帧落「其他」：${p.bindingRaw || '?'}`);
 
-    return { texts, author, textareas, date, binding, warnings, filled, skipped };
+    return { texts, authors, textareas, date, binding, warnings, filled, skipped };
   }
 
   // ── node 测试导出（在 DOM 启动代码之前 return） ──────────────────────────
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
-      normalizePrice, mapBinding, normalizeTitle, parsePageCount, isPayloadFresh,
+      normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, isPayloadFresh,
       bindingRadioValue, buildFillPlan,
     };
     return;
@@ -325,6 +328,22 @@
     return out;
   }
 
+  /** 作者简介：rpi 布局把 "About the Author" 放进 #editorialReviews_feature_div，
+   *  取该标题的下一个兄弟节点文本；旧布局退回 #authorBio_feature_div。 */
+  function extractAuthorBio() {
+    const er = document.querySelector('#editorialReviews_feature_div');
+    if (er) {
+      for (const h of er.querySelectorAll('h2, h3')) {
+        if (h.textContent.toLowerCase().replace(/[^a-z]/g, '') === 'abouttheauthor') {
+          const sib = h.nextElementSibling;
+          const t = sib ? (sib.innerText || sib.textContent || '').trim() : '';
+          if (t) return t;
+        }
+      }
+    }
+    return firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
+  }
+
   function firstText(selectors) {
     for (const sel of selectors) {
       const el = document.querySelector(sel);
@@ -369,8 +388,8 @@
       ])
     );
 
-    const description = firstText(['#bookDescription_feature_div', '#bookDescription_expander']);
-    const authorBio = firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
+    const description = cleanDescription(firstText(['#bookDescription_feature_div', '#bookDescription_expander']));
+    const authorBio = extractAuthorBio();
     const coverEl = document.querySelector('#landingImage, #imgBlkFront');
     const coverUrl = coverEl ? coverEl.getAttribute('data-old-hires') || coverEl.getAttribute('src') || '' : '';
 
@@ -614,6 +633,24 @@
     }
   }
 
+  /** 多作者：第一位填进现有左栏，其余克隆 <li> 追加。人物实体关联栏（右栏）一律留空。 */
+  function setAuthors(root, authors) {
+    if (!authors.length) return;
+    const item = fieldByLabel(root, '作者');
+    const ul = item && item.querySelector('ul');
+    const firstLi = ul && ul.querySelector('li');
+    if (!firstLi) return;
+    const leftInput = (li) => li.querySelectorAll('input')[0];
+    fireValue(leftInput(firstLi), authors[0]);
+    for (let i = 1; i < authors.length; i++) {
+      const li = firstLi.cloneNode(true);
+      li.querySelectorAll('input').forEach((inp) => { inp.value = ''; });
+      li.querySelectorAll('a.add, .author-tip').forEach((e) => e.remove());
+      fireValue(leftInput(li), authors[i]);
+      ul.appendChild(li);
+    }
+  }
+
   function setBinding(root, binding) {
     const item = fieldByLabel(root, '装帧');
     if (!item) return;
@@ -689,7 +726,7 @@
 
     const plan = buildFillPlan(payload);
     for (const t of plan.texts) setTextByLabel(root, t.label, t.value);
-    if (plan.author) setTextByLabel(root, '作者', plan.author);
+    setAuthors(root, plan.authors);
     for (const a of plan.textareas) setTextareaByLabel(root, a.label, a.value);
     setBinding(root, plan.binding);
     setPubDate(root, plan.date);
