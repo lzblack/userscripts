@@ -16,7 +16,7 @@ const {
   isPayloadFresh,
   bindingRadioValue,
   buildFillPlan,
-} = require('./douban-book-bridge.user.js');
+} = require('./douban-add-book.user.js');
 
 const SAPIENS = {
   title: 'Sapiens',

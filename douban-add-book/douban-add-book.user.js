@@ -19,8 +19,8 @@
 // @icon         https://img3.doubanio.com/favicon.ico
 // @icon64       https://img3.doubanio.com/favicon.ico
 // @license      MIT
-// @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-book-bridge/douban-book-bridge.user.js
-// @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/douban-book-bridge/douban-book-bridge.user.js
+// @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-add-book/douban-add-book.user.js
+// @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/douban-add-book/douban-add-book.user.js
 // ==/UserScript==
 
 (function () {
@@ -30,7 +30,7 @@
   const str = (v) => String(v == null ? '' : v);
 
   // ============================================================
-  // 纯函数解析层 — 无 DOM/网络副作用（见 douban-book-bridge.test.js）
+  // 纯函数解析层 — 无 DOM/网络副作用（见 douban-add-book.test.js）
   // ============================================================
 
   const MONTHS = {
