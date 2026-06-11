@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         豆瓣图书桥 | Douban Book Bridge
+// @name         豆瓣一键添书 | One-Click Add to Douban
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
 // @version      0.1.0
 // @author       lzblack
-// @description  在 Amazon 图书页一键查豆瓣是否收录；未收录则跳转添加流程并自动回填（豆瓣回填器开发中）。人工只负责审核和提交。
+// @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
 // @match        https://book.douban.com/new_subject*
 // @connect      book.douban.com
@@ -26,6 +26,9 @@
 (function () {
   'use strict';
 
+  /** null/undefined 安全的 String()——全脚本统一用它收口空值。 */
+  const str = (v) => String(v == null ? '' : v);
+
   // ============================================================
   // 纯函数解析层 — 无 DOM/网络副作用（见 douban-book-bridge.test.js）
   // ============================================================
@@ -37,7 +40,7 @@
 
   /** 校验 ISBN-13：长度 13、前缀 978/979、mod-10 校验位。 */
   function validateIsbn13(input) {
-    const s = String(input == null ? '' : input).replace(/[^0-9]/g, '');
+    const s = str(input).replace(/[^0-9]/g, '');
     if (s.length !== 13) return false;
     if (!/^97[89]/.test(s)) return false;
     let sum = 0;
@@ -49,7 +52,7 @@
 
   /** ISBN-10 → ISBN-13（加 978 前缀、重算校验位）。非 10 位输入返回 null。 */
   function isbn10to13(input) {
-    const s = String(input == null ? '' : input).replace(/[^0-9Xx]/g, '');
+    const s = str(input).replace(/[^0-9Xx]/g, '');
     if (s.length !== 10) return null;
     const core = '978' + s.slice(0, 9);
     let sum = 0;
@@ -62,7 +65,7 @@
 
   /** 按第一个冒号拆正/副标题（半角或全角冒号）。 */
   function splitTitle(input) {
-    const s = String(input == null ? '' : input).trim();
+    const s = str(input).trim();
     const idx = s.search(/[:：]/);
     if (idx === -1) return { title: s, subtitle: '' };
     return { title: s.slice(0, idx).trim(), subtitle: s.slice(idx + 1).trim() };
@@ -70,7 +73,7 @@
 
   /** 解析 "March 5, 2024" / "Mar 2024" / "2024" → {y,m,d}（缺位为 null）；无年份返回 null。 */
   function parseDate(input) {
-    const s = String(input == null ? '' : input).trim();
+    const s = str(input).trim();
     const ym = s.match(/([A-Za-z]{3,})[^0-9A-Za-z]+(?:(\d{1,2})[^0-9A-Za-z]+)?(\d{4})/);
     if (ym) {
       const mon = MONTHS[ym[1].slice(0, 3).toLowerCase()];
@@ -85,7 +88,7 @@
 
   /** 拆 "Penguin Press (March 5, 2024)" → {publisher, date|null}。无括号日期则 date=null。 */
   function splitPublisherDate(input) {
-    const s = String(input == null ? '' : input).trim();
+    const s = str(input).trim();
     const m = s.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
     if (m) {
       const date = parseDate(m[2]);
@@ -96,7 +99,7 @@
 
   /** 归一化定价 → {currency, amount:'30.00'}；识别 $/£/€ 与三字母代码。无法解析返回 null。 */
   function normalizePrice(input) {
-    const s = String(input == null ? '' : input).trim();
+    const s = str(input).trim();
     if (!s) return null;
     const SYMBOL = { $: 'USD', '£': 'GBP', '€': 'EUR', '¥': 'CNY' };
     let currency = null;
@@ -113,7 +116,7 @@
 
   /** 装帧归一化：含 hardcover→'hardcover'，含 paperback→'paperback'，否则 'other'。 */
   function mapBinding(input) {
-    const s = String(input == null ? '' : input).toLowerCase();
+    const s = str(input).toLowerCase();
     if (s.includes('hardcover') || s.includes('hardback')) return 'hardcover';
     if (s.includes('paperback')) return 'paperback';
     return 'other';
@@ -121,19 +124,19 @@
 
   /** 书名归一化（与 rating-hub 一致）：&→and、小写、去非字母数字。用于 suggest 精确匹配。 */
   function normalizeTitle(input) {
-    return (input == null ? '' : String(input)).replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return str(input).replace(/&/g, 'and').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
   /** "320 pages" / "1,024 pages" / "xii, 416 pages" → 整数；无数字返回 null。 */
   function parsePageCount(input) {
-    const s = String(input == null ? '' : input).replace(/,/g, '');
+    const s = str(input).replace(/,/g, '');
     const m = s.match(/\d+/);
     return m ? Number(m[0]) : null;
   }
 
   /** 剥掉 Amazon 简介尾部的展开切换文案（"Read more" / "Read less"）。 */
   function cleanDescription(input) {
-    return String(input == null ? '' : input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
+    return str(input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
   }
 
   /** payload 是否在 TTL 窗口内（now - capturedAt < ttl）。 */
@@ -153,7 +156,7 @@
   /**
    * 纯函数：payload → 豆瓣第二步回填计划。无 DOM 副作用，便于单测。
    * 字段按「标签文本」标识；DOM 执行器据此定位控件。
-   * @returns {{texts,author,textareas,date,binding,warnings,filled,skipped}}
+   * @returns {{texts,authors,textareas,date,binding,warnings,filled,skipped}}
    */
   function buildFillPlan(payload) {
     const p = payload || {};
@@ -215,6 +218,7 @@
   const COVER_KEY = 'dbb:cover';
   const TTL_MS = 10 * 60 * 1000;
   const NEW_SUBJECT_BASE = 'https://book.douban.com/new_subject';
+  const HIGHLIGHT_SHADOW = '0 0 0 3px rgba(46,125,50,.6)'; // 绿色「该点这个」描边
 
   const deps = {
     // 默认带 cookie：唯一跨域目标是豆瓣，登录态既是 new_subject 的前提，
@@ -234,23 +238,22 @@
         });
       });
     },
-    log(...args) { console.log('[BookBridge]', ...args); },
   };
 
   function escapeHtml(input) {
-    return String(input == null ? '' : input)
+    return str(input)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function safeLinkUrl(input) {
-    const url = String(input == null ? '' : input).trim();
+    const url = str(input).trim();
     return /^https?:\/\//i.test(url) ? url : '#';
   }
 
   /** 清洗 Amazon 详情里的方向控制符与冒号噪声，折叠空白。 */
   function cleanLabel(s) {
-    return String(s == null ? '' : s)
+    return str(s)
       .replace(/[‎‏‪-‮]/g, '')
       .replace(/[:：]\s*$/, '')
       .replace(/\s+/g, ' ')
@@ -311,6 +314,18 @@
     return row ? row.value : '';
   }
 
+  /** 按选择器顺序返回首个非空文本（innerText 优先，回退 textContent）。 */
+  function firstText(selectors) {
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        const t = (el.innerText || el.textContent || '').trim();
+        if (t) return t;
+      }
+    }
+    return '';
+  }
+
   const BINDING_RE = /^(Hardcover|Paperback|Kindle Edition|Kindle|Board book|Mass Market Paperback|Audiobook|Spiral-bound|Library Binding)$/i;
 
   /** 当前版本的装帧：rpi 布局放在 #bylineInfo 的叶子节点；旧布局在 #productSubtitle。 */
@@ -363,17 +378,6 @@
     const paras = [...content.querySelectorAll('p')].map((p) => p.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const text = paras.length ? paras.join('\n\n') : (content.textContent || '').replace(/\s+/g, ' ').trim();
     return cleanDescription(text);
-  }
-
-  function firstText(selectors) {
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el) {
-        const t = (el.innerText || el.textContent || '').trim();
-        if (t) return t;
-      }
-    }
-    return '';
   }
 
   /** 从 Amazon 图书页提取 canonical payload；ISBN 无效则 isbn13=null（调用方据此阻断）。 */
@@ -439,7 +443,7 @@
   function parseDoubanRating(html) {
     try {
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const num = doc.querySelector('#interest_sectl strong.rating_num, strong.rating_num');
+      const num = doc.querySelector('strong.rating_num');
       const val = num ? parseFloat(num.textContent.trim()) : NaN;
       return isNaN(val) || val === 0 ? null : val.toFixed(1);
     } catch {
@@ -589,7 +593,7 @@
   // ============================================================
 
   function normLabel(s) {
-    return String(s == null ? '' : s).replace(/\*/g, '').replace(/\s+/g, '').trim();
+    return str(s).replace(/\*/g, '').replace(/\s+/g, '').trim();
   }
 
   /** 在指定表单内按 label 文本找到所属 .item 容器。 */
@@ -712,7 +716,7 @@
       : '';
     injectBanner(
       root,
-      `<b>豆瓣图书桥 · 已回填</b>　<span style="color:#888">请核对后人工点「下一步」提交</span>` +
+      `<b>豆瓣一键添书 · 已回填</b>　<span style="color:#888">请核对后人工点「下一步」提交</span>` +
         `<div style="margin-top:8px">已填：${chips(plan.filled, '#dbefda')}</div>` +
         (plan.skipped.length ? `<div style="margin-top:4px;color:#999">跳过：${chips(plan.skipped, '#eee')}</div>` : '') +
         warn
@@ -721,7 +725,7 @@
 
   function highlightSubmit(root) {
     const btn = root.querySelector('input[type="submit"]');
-    if (btn) btn.style.boxShadow = '0 0 0 3px rgba(46,125,50,.6)';
+    if (btn) btn.style.boxShadow = HIGHLIGHT_SHADOW;
   }
 
   function fillStep1(root, payload) {
@@ -729,7 +733,7 @@
     const el = item && item.querySelector('input.input_basic');
     if (el && payload.isbn13) fireValue(el, payload.isbn13);
     highlightSubmit(root);
-    injectBanner(root, `<b>豆瓣图书桥</b>　已填 ISBN <code>${escapeHtml(payload.isbn13 || '')}</code> — 请点「下一步」（豆瓣将做服务端查重）。`);
+    injectBanner(root, `<b>豆瓣一键添书</b>　已填 ISBN <code>${escapeHtml(payload.isbn13 || '')}</code> — 请点「下一步」（豆瓣将做服务端查重）。`);
   }
 
   function formIsbnDigits(root) {
@@ -795,7 +799,7 @@
   function injectCoverBanner(fileInput, ok, coverUrl) {
     const form = fileInput.closest('form') || fileInput.parentElement;
     const submit = form.querySelector('input[name="img_submit"], input[type="submit"]');
-    if (ok && submit) submit.style.boxShadow = '0 0 0 3px rgba(46,125,50,.6)';
+    if (ok && submit) submit.style.boxShadow = HIGHLIGHT_SHADOW;
     injectBanner(
       form,
       ok
