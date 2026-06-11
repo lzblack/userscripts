@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      0.1.0
+// @version      1.0.0
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
