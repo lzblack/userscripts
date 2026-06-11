@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.1
+// @version      1.0.2
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -793,21 +793,25 @@
       dt.items.add(file);
       fileInput.files = dt.files;
       fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-      injectCoverBanner(fileInput, true, info.coverUrl);
+      // 用 blob 生成预览（显示真正会上传的字节，让用户能核对封面）
+      injectCoverBanner(fileInput, true, info.coverUrl, URL.createObjectURL(blob));
     } catch {
-      injectCoverBanner(fileInput, false, info.coverUrl);
+      injectCoverBanner(fileInput, false, info.coverUrl, null);
     }
   }
 
-  function injectCoverBanner(fileInput, ok, coverUrl) {
+  function injectCoverBanner(fileInput, ok, coverUrl, previewUrl) {
     const form = fileInput.closest('form') || fileInput.parentElement;
     const submit = form.querySelector('input[name="img_submit"], input[type="submit"]');
     if (ok && submit) submit.style.boxShadow = HIGHLIGHT_SHADOW;
+    const preview = ok && previewUrl
+      ? `<div style="margin-top:8px"><img src="${escapeHtml(previewUrl)}" alt="封面预览" style="max-height:200px;max-width:100%;border:1px solid #d6c79b;border-radius:4px"></div>`
+      : '';
     injectBanner(
       form,
       ok
-        ? `<b style="color:#2e7d32">封面已就绪</b>（来自 Amazon）— 请核对后点「上传图片」。`
-        : `<b style="color:#c0392b">封面自动获取失败</b> — 可<a href="${escapeHtml(safeLinkUrl(coverUrl))}" target="_blank" rel="noopener">打开原图</a>手动选择，或点「跳过」。`
+        ? `<b style="color:#2e7d32">封面已就绪</b>（来自 Amazon）。核对下方预览后点「上传图片」。${preview}`
+        : `<b style="color:#c0392b">封面自动获取失败</b>。可<a href="${escapeHtml(safeLinkUrl(coverUrl))}" target="_blank" rel="noopener">打开原图</a>手动选择，或点「跳过」。`
     );
   }
 
