@@ -344,6 +344,18 @@
     return firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
   }
 
+  /** 内容简介：取展开块的内容节点 .a-expander-content，按 DOM 顺序逐段读 textContent。
+   *  关键：用 textContent 而非 innerText——partial-collapse 的渐隐预览会让 innerText
+   *  按视觉布局重排并重复段落（见 Messy Jobs/B0H4495X34）。 */
+  function extractDescription() {
+    const root = document.querySelector('#bookDescription_feature_div') || document.querySelector('#bookDescription_expander');
+    if (!root) return '';
+    const content = root.querySelector('.a-expander-content') || root;
+    const paras = [...content.querySelectorAll('p')].map((p) => p.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const text = paras.length ? paras.join('\n\n') : (content.textContent || '').replace(/\s+/g, ' ').trim();
+    return cleanDescription(text);
+  }
+
   function firstText(selectors) {
     for (const sel of selectors) {
       const el = document.querySelector(sel);
@@ -388,7 +400,7 @@
       ])
     );
 
-    const description = cleanDescription(firstText(['#bookDescription_feature_div', '#bookDescription_expander']));
+    const description = extractDescription();
     const authorBio = extractAuthorBio();
     const coverEl = document.querySelector('#landingImage, #imgBlkFront');
     const coverUrl = coverEl ? coverEl.getAttribute('data-old-hires') || coverEl.getAttribute('src') || '' : '';
