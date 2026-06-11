@@ -136,11 +136,68 @@
     return now - at < ttl;
   }
 
+  /** canonical binding → 豆瓣装帧 radio 的 value（英文对英文精确映射）。 */
+  function bindingRadioValue(binding) {
+    if (binding === 'hardcover') return 'Hardcover';
+    if (binding === 'paperback') return 'Paperback';
+    return 'other';
+  }
+
+  /**
+   * 纯函数：payload → 豆瓣第二步回填计划。无 DOM 副作用，便于单测。
+   * 字段按「标签文本」标识；DOM 执行器据此定位控件。
+   * @returns {{texts,author,textareas,date,binding,warnings,filled,skipped}}
+   */
+  function buildFillPlan(payload) {
+    const p = payload || {};
+    const texts = [];
+    const filled = [];
+    const skipped = [];
+    const warnings = [];
+
+    const pushText = (label, value) => {
+      if (value) { texts.push({ label, value }); filled.push(label); }
+      else skipped.push(label);
+    };
+    pushText('书名', p.title);
+    pushText('副标题', p.subtitle);
+    pushText('定价', p.price ? `${p.price.currency} ${p.price.amount}` : '');
+    pushText('出版社', p.publisher);
+    pushText('页数', p.pageCount != null ? String(p.pageCount) : '');
+
+    const authors = Array.isArray(p.authors) ? p.authors : [];
+    const author = authors[0] || '';
+    if (author) filled.push('作者');
+    else { skipped.push('作者'); warnings.push('缺作者（豆瓣必填）'); }
+    if (authors.length > 1) warnings.push(`还有 ${authors.length - 1} 位作者需手动点 + 添加`);
+
+    const textareas = [];
+    const pushArea = (label, value, required) => {
+      if (value) { textareas.push({ label, value }); filled.push(label); }
+      else { skipped.push(label); if (required) warnings.push(`${label}缺失（豆瓣必填）`); }
+    };
+    pushArea('内容简介', p.description, true);
+    pushArea('作者简介', p.authorBio, false);
+
+    const d = p.pubDate || {};
+    const date = { y: d.y || null, m: d.m || null, d: d.d || null };
+    if (date.y) filled.push('出版日期');
+    else { skipped.push('出版日期'); warnings.push('缺出版日期'); }
+
+    const radioValue = bindingRadioValue(p.binding);
+    const binding = { radioValue, otherText: radioValue === 'other' ? (p.bindingRaw || '') : '' };
+    filled.push('装帧');
+    if (radioValue === 'other') warnings.push(`装帧落「其他」：${p.bindingRaw || '?'}`);
+
+    return { texts, author, textareas, date, binding, warnings, filled, skipped };
+  }
+
   // ── node 测试导出（在 DOM 启动代码之前 return） ──────────────────────────
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
       normalizePrice, mapBinding, normalizeTitle, parsePageCount, isPayloadFresh,
+      bindingRadioValue, buildFillPlan,
     };
     return;
   }
@@ -488,19 +545,177 @@
   }
 
   // ============================================================
-  // 豆瓣侧（回填器开发中）— 当前仅验证跨域交接
+  // 豆瓣侧回填器（与来源无关）— 标签文本定位，不依赖 name/id
   // ============================================================
 
-  function runDouban() {
-    const raw = GM_getValue(STORAGE_KEY);
-    if (!raw) return;
-    let payload;
-    try { payload = JSON.parse(raw); } catch { return; }
-    if (!isPayloadFresh(payload, Date.now(), TTL_MS)) {
-      GM_deleteValue(STORAGE_KEY);
-      return;
+  function normLabel(s) {
+    return String(s == null ? '' : s).replace(/\*/g, '').replace(/\s+/g, '').trim();
+  }
+
+  /** 在指定表单内按 label 文本找到所属 .item 容器。 */
+  function fieldByLabel(root, labelText) {
+    const want = normLabel(labelText);
+    for (const label of root.querySelectorAll('label')) {
+      if (normLabel(label.textContent) === want) return label.closest('.item');
     }
-    deps.log('payload received (回填器待实现):', payload);
+    return null;
+  }
+
+  function fireValue(el, value) {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function setTextByLabel(root, labelText, value) {
+    const item = fieldByLabel(root, labelText);
+    const el = item && item.querySelector('input.input_basic');
+    if (!el) return false;
+    fireValue(el, value);
+    return true;
+  }
+
+  function setTextareaByLabel(root, labelText, value) {
+    const item = fieldByLabel(root, labelText);
+    const el = item && item.querySelector('textarea.textarea_basic');
+    if (!el) return false;
+    fireValue(el, value);
+    return true;
+  }
+
+  function setSelect(sel, val) {
+    sel.value = String(val);
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /** 「日」下拉由豆瓣脚本在「月」change 后异步填充，轮询直到目标 option 出现。 */
+  function pollDay(daySel, day, attempts) {
+    if (day == null) return;
+    const tick = (n) => {
+      if ([...daySel.options].some((o) => o.value === String(day))) {
+        setSelect(daySel, day);
+        return;
+      }
+      if (n > 0) setTimeout(() => tick(n - 1), 60);
+    };
+    tick(attempts);
+  }
+
+  function setPubDate(root, date) {
+    if (!date.y) return;
+    const item = fieldByLabel(root, '出版日期');
+    const sels = item ? item.querySelectorAll('select') : [];
+    if (sels.length < 3) return;
+    const [yearSel, monthSel, daySel] = sels;
+    setSelect(yearSel, date.y);
+    if (date.m) {
+      setSelect(monthSel, date.m);
+      pollDay(daySel, date.d, 20);
+    }
+  }
+
+  function setBinding(root, binding) {
+    const item = fieldByLabel(root, '装帧');
+    if (!item) return;
+    const radio = item.querySelector(`input[type="radio"][value="${binding.radioValue}"]`);
+    if (radio) {
+      radio.checked = true;
+      radio.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (binding.radioValue === 'other') {
+      const other = item.querySelector('input.other');
+      if (other) fireValue(other, binding.otherText);
+    }
+  }
+
+  const SUMMARY_ID = 'dbb-summary';
+
+  function injectBanner(root, innerHtml) {
+    let bar = document.getElementById(SUMMARY_ID);
+    if (bar) bar.remove();
+    bar = document.createElement('div');
+    bar.id = SUMMARY_ID;
+    bar.style.cssText =
+      'margin:0 0 14px;padding:12px 14px;border:1px solid #d6c79b;border-radius:8px;' +
+      'background:#fcf9ef;font-size:13px;line-height:1.7;color:#333';
+    bar.innerHTML = innerHtml;
+    root.parentElement.insertBefore(bar, root);
+  }
+
+  function chips(items, color) {
+    return items
+      .map((t) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:1px 7px;border-radius:10px;background:${color};font-size:12px">${escapeHtml(t)}</span>`)
+      .join('');
+  }
+
+  function injectSummary(root, plan) {
+    const warn = plan.warnings.length
+      ? `<div style="margin-top:8px;color:#b8500b">${plan.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('<br>')}</div>`
+      : '';
+    injectBanner(
+      root,
+      `<b>豆瓣图书桥 · 已回填</b>　<span style="color:#888">请核对后人工点「下一步」提交</span>` +
+        `<div style="margin-top:8px">已填：${chips(plan.filled, '#dbefda')}</div>` +
+        (plan.skipped.length ? `<div style="margin-top:4px;color:#999">跳过：${chips(plan.skipped, '#eee')}</div>` : '') +
+        warn
+    );
+  }
+
+  function highlightSubmit(root) {
+    const btn = root.querySelector('input[type="submit"]');
+    if (btn) btn.style.boxShadow = '0 0 0 3px rgba(46,125,50,.6)';
+  }
+
+  function fillStep1(root, payload) {
+    const item = fieldByLabel(root, 'ISBN');
+    const el = item && item.querySelector('input.input_basic');
+    if (el && payload.isbn13) fireValue(el, payload.isbn13);
+    highlightSubmit(root);
+    injectBanner(root, `<b>豆瓣图书桥</b>　已填 ISBN <code>${escapeHtml(payload.isbn13 || '')}</code> — 请点「下一步」（豆瓣将做服务端查重）。`);
+  }
+
+  function formIsbnDigits(root) {
+    const uid = root.querySelector('input[name="p_uid"]');
+    const val = uid ? uid.value : (fieldByLabel(root, 'ISBN')?.querySelector('input')?.value || '');
+    return String(val).replace(/[^0-9]/g, '');
+  }
+
+  function fillStep2(root, payload) {
+    const formIsbn = formIsbnDigits(root);
+    if (formIsbn && payload.isbn13 && formIsbn !== payload.isbn13) {
+      injectBanner(root, `<b style="color:#c0392b">未自动回填</b>：表单 ISBN（${escapeHtml(formIsbn)}）与 Amazon 抓取的（${escapeHtml(payload.isbn13)}）不一致，疑似不同书。请手动核对。`);
+      return; // 不动表单、不消费 payload
+    }
+
+    const plan = buildFillPlan(payload);
+    for (const t of plan.texts) setTextByLabel(root, t.label, t.value);
+    if (plan.author) setTextByLabel(root, '作者', plan.author);
+    for (const a of plan.textareas) setTextareaByLabel(root, a.label, a.value);
+    setBinding(root, plan.binding);
+    setPubDate(root, plan.date);
+    injectSummary(root, plan);
+    highlightSubmit(root);
+
+    GM_deleteValue(STORAGE_KEY); // 消费即删
+  }
+
+  function runDouban() {
+    const form = document.querySelector('form.detail_form');
+    if (!form) return;
+
+    let payload = null;
+    const raw = GM_getValue(STORAGE_KEY);
+    if (raw) {
+      try {
+        const p = JSON.parse(raw);
+        if (isPayloadFresh(p, Date.now(), TTL_MS)) payload = p;
+        else GM_deleteValue(STORAGE_KEY);
+      } catch { /* 损坏即忽略 */ }
+    }
+    if (!payload) return; // 无有效 payload：用户可能在正常手动添加，什么都不做
+
+    if (fieldByLabel(form, '副标题')) fillStep2(form, payload);
+    else fillStep1(form, payload);
   }
 
   // ============================================================

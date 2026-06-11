@@ -13,7 +13,24 @@ const {
   normalizeTitle,
   parsePageCount,
   isPayloadFresh,
+  bindingRadioValue,
+  buildFillPlan,
 } = require('./douban-book-bridge.user.js');
+
+const SAPIENS = {
+  title: 'Sapiens',
+  subtitle: 'A Brief History of Humankind',
+  authors: ['Yuval Noah Harari'],
+  isbn13: '9780062316097',
+  publisher: 'Harper',
+  pubDate: { y: 2015, m: 2, d: 10 },
+  pageCount: 464,
+  binding: 'hardcover',
+  bindingRaw: 'Hardcover',
+  price: { currency: 'USD', amount: '27.63' },
+  description: 'Long description here.',
+  authorBio: '',
+};
 
 // ── validateIsbn13 ──────────────────────────────────────────────────────────
 test('validateIsbn13: canonical valid 978/979', () => {
@@ -128,4 +145,53 @@ test('isPayloadFresh: TTL window', () => {
   assert.equal(isPayloadFresh({ source: { capturedAt: 1000 } }, 1000 + 600001, ttl), false);
   assert.equal(isPayloadFresh({}, 5000, ttl), false); // no capturedAt
   assert.equal(isPayloadFresh(null, 5000, ttl), false);
+});
+
+// ── bindingRadioValue ───────────────────────────────────────────────────────
+test('bindingRadioValue: canonical → douban radio value', () => {
+  assert.equal(bindingRadioValue('hardcover'), 'Hardcover');
+  assert.equal(bindingRadioValue('paperback'), 'Paperback');
+  assert.equal(bindingRadioValue('other'), 'other');
+});
+
+// ── buildFillPlan ───────────────────────────────────────────────────────────
+test('buildFillPlan: happy path maps every fillable field', () => {
+  const plan = buildFillPlan(SAPIENS);
+  const byLabel = Object.fromEntries(plan.texts.map((t) => [t.label, t.value]));
+  assert.equal(byLabel['书名'], 'Sapiens');
+  assert.equal(byLabel['副标题'], 'A Brief History of Humankind');
+  assert.equal(byLabel['定价'], 'USD 27.63');
+  assert.equal(byLabel['出版社'], 'Harper');
+  assert.equal(byLabel['页数'], '464');
+  assert.equal(plan.author, 'Yuval Noah Harari');
+  assert.deepEqual(plan.date, { y: 2015, m: 2, d: 10 });
+  assert.deepEqual(plan.binding, { radioValue: 'Hardcover', otherText: '' });
+  assert.equal(plan.textareas.find((a) => a.label === '内容简介').value, 'Long description here.');
+  assert.deepEqual(plan.warnings, []);
+});
+
+test('buildFillPlan: multi-author warns with remaining count', () => {
+  const plan = buildFillPlan({ ...SAPIENS, authors: ['A Author', 'B Author', 'C Author'] });
+  assert.equal(plan.author, 'A Author');
+  assert.ok(plan.warnings.some((w) => /还有 2 位作者/.test(w)));
+});
+
+test('buildFillPlan: missing required fields produce warnings, not throws', () => {
+  const plan = buildFillPlan({ ...SAPIENS, authors: [], description: '' });
+  assert.ok(plan.warnings.some((w) => /缺作者/.test(w)));
+  assert.ok(plan.warnings.some((w) => /内容简介缺失/.test(w)));
+  assert.ok(plan.skipped.includes('作者'));
+  assert.ok(plan.skipped.includes('内容简介'));
+});
+
+test('buildFillPlan: binding other carries raw text and warns', () => {
+  const plan = buildFillPlan({ ...SAPIENS, binding: 'other', bindingRaw: 'Spiral-bound' });
+  assert.deepEqual(plan.binding, { radioValue: 'other', otherText: 'Spiral-bound' });
+  assert.ok(plan.warnings.some((w) => /装帧落「其他」.*Spiral-bound/.test(w)));
+});
+
+test('buildFillPlan: null price is skipped, not filled', () => {
+  const plan = buildFillPlan({ ...SAPIENS, price: null });
+  assert.ok(!plan.texts.some((t) => t.label === '定价'));
+  assert.ok(plan.skipped.includes('定价'));
 });
