@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.2
+// @version      1.0.3
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -352,8 +352,46 @@
     return out;
   }
 
-  /** 作者简介：rpi 布局把 "About the Author" 放进 #editorialReviews_feature_div，
-   *  取该标题的下一个兄弟节点文本；旧布局退回 #authorBio_feature_div。 */
+  function descriptionContentNode() {
+    const root = document.querySelector('#bookDescription_feature_div') || document.querySelector('#bookDescription_expander');
+    return root ? root.querySelector('.a-expander-content') || root : null;
+  }
+
+  const ABOUT_AUTHOR_RE = /(^|\n)[ \t]*about the author[ \t]*(\n|$)/i;
+
+  /** 把简介内容节点读成带换行的纯文本。
+   *  有 <p>/<li> 时按块读（li 加「· 」，见 McCartney Legacy/0063000709）；否则是
+   *  span+<br> 结构（见 Math for Web Design/1633434826），把 <br> 当换行——否则
+   *  textContent 会把所有段落挤成一行。始终用 textContent（DOM 顺序、单份），
+   *  不碰 partial-collapse 的 innerText 重排坑（见 Messy Jobs/B0H4495X34）。 */
+  function descriptionBlockText(content) {
+    const blocks = [...content.querySelectorAll('p, li')];
+    if (blocks.length) {
+      return blocks
+        .map((el) => (el.tagName === 'LI' ? '· ' : '') + el.textContent.replace(/\s+/g, ' ').trim())
+        .filter((t) => t && t !== '· ')
+        .join('\n\n');
+    }
+    const clone = content.cloneNode(true);
+    clone.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+    return clone.textContent
+      .replace(/[^\S\n]+/g, ' ')
+      .split('\n').map((l) => l.trim()).join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /** 内容简介：读全文后，若内嵌「About the author」小节则截断到它之前（作者简介另取）。 */
+  function extractDescription() {
+    const content = descriptionContentNode();
+    if (!content) return '';
+    const full = descriptionBlockText(content);
+    const m = full.match(ABOUT_AUTHOR_RE);
+    return cleanDescription(m ? full.slice(0, m.index).trim() : full);
+  }
+
+  /** 作者简介：先取 #editorialReviews 的「About the Author」（Sapiens 式）；否则取简介
+   *  内嵌「About the author」小节之后的文本（Manning 式）；再退旧选择器。 */
   function extractAuthorBio() {
     const er = document.querySelector('#editorialReviews_feature_div');
     if (er) {
@@ -365,22 +403,16 @@
         }
       }
     }
+    const content = descriptionContentNode();
+    if (content) {
+      const full = descriptionBlockText(content);
+      const m = full.match(ABOUT_AUTHOR_RE);
+      if (m) {
+        const bio = full.slice(m.index + m[0].length).trim();
+        if (bio) return bio;
+      }
+    }
     return firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
-  }
-
-  /** 内容简介：取展开块的内容节点 .a-expander-content，按 DOM 顺序逐段读 textContent。
-   *  收 <p> 与 <li>（项目列表也是简介的一部分，见 McCartney Legacy/0063000709）。
-   *  关键：用 textContent 而非 innerText——partial-collapse 的渐隐预览会让 innerText
-   *  按视觉布局重排并重复段落（见 Messy Jobs/B0H4495X34）。 */
-  function extractDescription() {
-    const root = document.querySelector('#bookDescription_feature_div') || document.querySelector('#bookDescription_expander');
-    if (!root) return '';
-    const content = root.querySelector('.a-expander-content') || root;
-    const blocks = [...content.querySelectorAll('p, li')]
-      .map((el) => (el.tagName === 'LI' ? '· ' : '') + el.textContent.replace(/\s+/g, ' ').trim())
-      .filter((t) => t !== '· ' && t !== '');
-    const text = blocks.length ? blocks.join('\n\n') : (content.textContent || '').replace(/\s+/g, ' ').trim();
-    return cleanDescription(text);
   }
 
   /** 从 Amazon 图书页提取 canonical payload；ISBN 无效则 isbn13=null（调用方据此阻断）。 */
