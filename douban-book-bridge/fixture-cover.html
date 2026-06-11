@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- 豆瓣 /new_subject 上传封面页结构（实页 DOM），用于封面注入验证。 -->
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>上传封面</title></head>
+<body>
+<div id="content">
+  <h1>上传封面</h1>
+  <div class="grid-16-8 clearfix">
+    <div class="article">
+      <h2><span>从你的电脑上选择图片</span></h2>
+      <form action="" method="post" enctype="multipart/form-data" class="fileupload">
+        <div style="display:none;"><input type="hidden" name="ck" value="n1VV"></div>
+        <input type="file" name="picfile" size="49">
+        <input name="img_submit" type="submit" value="上传图片">
+        <p class="pl">&gt; <a href="/new_subject?mine&amp;audit=36778075">跳过</a></p>
+        <input name="audit" type="hidden" value="36778075">
+        <input name="as_new" type="hidden" value="t">
+      </form>
+      <div class="attn">你没有选择图像文件</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
