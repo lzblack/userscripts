@@ -134,20 +134,19 @@
     return m ? Number(m[0]) : null;
   }
 
-  /** 图书专属详情标签：ISBN / 印张 / 出版日期。仅图书页才会出现。 */
-  const BOOK_LABEL_RE = /isbn-1[03]|print length|publication date|reading age|lexile measure|grade level/i;
+  /** Amazon 详情页根容器 #dp 的类目 class：纸质书 'book'、Kindle 'ebooks'（实测）。 */
+  const BOOK_DP_CLASS_RE = /(^|\s)(book|ebooks)(\s|$)/;
 
   /**
-   * 纯函数：判断 Amazon 详情是否来自图书页（vs 电子产品等非图书商品）。
-   * 主信号：详情行含图书专属标签，或面包屑落在 Books/Kindle 类目；
-   * 次信号：当前版本装帧是图书装帧（Kindle Edition/Paperback/…）。
-   * 覆盖 Kindle 版（无 ISBN 但有 Print length/Publication date）的「切换 print edition」流程。
+   * 纯函数：依据 Amazon 自带的类目标记判断是否图书页（vs 电子产品等非图书商品）。
+   * 主信号 #dp class —— Amazon 页面类型分类（book/ebooks vs ce/...），权威且精确；
+   * 次信号面包屑落在 Books/Kindle Store 类目，作为 #dp 缺失时的兜底。
+   * 二者皆为类目路径信号，覆盖纸质书与 Kindle 版（含无 ISBN 的「切换 print edition」流程）。
    */
-  function hasBookSignals(rows, opts) {
+  function isBookCategory(opts) {
     const o = opts || {};
-    if (Array.isArray(rows) && rows.some((r) => BOOK_LABEL_RE.test(str(r && r.label)))) return true;
+    if (BOOK_DP_CLASS_RE.test(str(o.dpClass))) return true;
     if (/\bbooks\b|kindle store/i.test(str(o.breadcrumb))) return true;
-    if (o.bookBinding) return true;
     return false;
   }
 
@@ -222,7 +221,7 @@
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
       normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, isPayloadFresh,
-      bindingRadioValue, buildFillPlan, hasBookSignals,
+      bindingRadioValue, buildFillPlan, isBookCategory,
     };
     return;
   }
@@ -432,13 +431,13 @@
     return firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
   }
 
-  /** DOM 胶水：收集图书信号交给纯函数 hasBookSignals 判定当前是否图书页。 */
+  /** DOM 胶水：取 Amazon 类目标记交给纯函数 isBookCategory 判定当前是否图书页。 */
   function isBookPage() {
-    const rows = [...amazonDetailRows(), ...rpiRows()];
+    const dp = document.querySelector('#dp');
     const crumbs = document.querySelector('#wayfinding-breadcrumbs_feature_div');
-    return hasBookSignals(rows, {
+    return isBookCategory({
+      dpClass: dp ? dp.className : '',
       breadcrumb: crumbs ? crumbs.textContent : '',
-      bookBinding: BINDING_RE.test(extractBindingRaw()),
     });
   }
 
