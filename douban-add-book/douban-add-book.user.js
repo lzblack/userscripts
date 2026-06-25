@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.3
+// @version      1.0.4
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -134,6 +134,23 @@
     return m ? Number(m[0]) : null;
   }
 
+  /** 图书专属详情标签：ISBN / 印张 / 出版日期。仅图书页才会出现。 */
+  const BOOK_LABEL_RE = /isbn-1[03]|print length|publication date|reading age|lexile measure|grade level/i;
+
+  /**
+   * 纯函数：判断 Amazon 详情是否来自图书页（vs 电子产品等非图书商品）。
+   * 主信号：详情行含图书专属标签，或面包屑落在 Books/Kindle 类目；
+   * 次信号：当前版本装帧是图书装帧（Kindle Edition/Paperback/…）。
+   * 覆盖 Kindle 版（无 ISBN 但有 Print length/Publication date）的「切换 print edition」流程。
+   */
+  function hasBookSignals(rows, opts) {
+    const o = opts || {};
+    if (Array.isArray(rows) && rows.some((r) => BOOK_LABEL_RE.test(str(r && r.label)))) return true;
+    if (/\bbooks\b|kindle store/i.test(str(o.breadcrumb))) return true;
+    if (o.bookBinding) return true;
+    return false;
+  }
+
   /** 剥掉 Amazon 简介尾部的展开切换文案（"Read more" / "Read less"）。 */
   function cleanDescription(input) {
     return str(input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
@@ -205,7 +222,7 @@
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
       normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, isPayloadFresh,
-      bindingRadioValue, buildFillPlan,
+      bindingRadioValue, buildFillPlan, hasBookSignals,
     };
     return;
   }
@@ -415,6 +432,16 @@
     return firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
   }
 
+  /** DOM 胶水：收集图书信号交给纯函数 hasBookSignals 判定当前是否图书页。 */
+  function isBookPage() {
+    const rows = [...amazonDetailRows(), ...rpiRows()];
+    const crumbs = document.querySelector('#wayfinding-breadcrumbs_feature_div');
+    return hasBookSignals(rows, {
+      breadcrumb: crumbs ? crumbs.textContent : '',
+      bookBinding: BINDING_RE.test(extractBindingRaw()),
+    });
+  }
+
   /** 从 Amazon 图书页提取 canonical payload；ISBN 无效则 isbn13=null（调用方据此阻断）。 */
   function extractAmazonPayload() {
     const rows = [...amazonDetailRows(), ...rpiRows()];
@@ -612,7 +639,8 @@
   }
 
   async function runAmazon() {
-    if (!document.querySelector('#productTitle')) return; // 非图书/详情页，静默早退
+    if (!document.querySelector('#productTitle')) return; // 非商品详情页，静默早退
+    if (!isBookPage()) return; // 非图书商品（电子产品等），静默早退
     const payload = extractAmazonPayload();
     if (!payload.isbn13) {
       renderBadge('no-isbn', payload, null);
