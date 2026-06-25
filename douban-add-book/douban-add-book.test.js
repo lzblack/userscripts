@@ -16,6 +16,7 @@ const {
   isPayloadFresh,
   bindingRadioValue,
   buildFillPlan,
+  hasBookSignals,
 } = require('./douban-add-book.user.js');
 
 const SAPIENS = {
@@ -121,6 +122,38 @@ test('mapBinding: hardcover / paperback / other', () => {
   assert.equal(mapBinding('Kindle Edition'), 'other');
   assert.equal(mapBinding('Board book'), 'other');
   assert.equal(mapBinding(''), 'other');
+});
+
+// ── hasBookSignals ────────────────────────────────────────────────────────────
+test('hasBookSignals: print book — ISBN row', () => {
+  const rows = [{ label: 'ISBN-13', value: '9780062316097' }, { label: 'Publisher', value: 'Harper' }];
+  assert.equal(hasBookSignals(rows, {}), true);
+});
+
+test('hasBookSignals: Kindle edition — no ISBN but Print length/Publication date', () => {
+  const rows = [{ label: 'Print length', value: '320 pages' }, { label: 'Publication date', value: 'March 5, 2024' }];
+  assert.equal(hasBookSignals(rows, {}), true); // 守住「切换 print edition」流程
+});
+
+test('hasBookSignals: book via breadcrumb or binding when rows are sparse', () => {
+  assert.equal(hasBookSignals([], { breadcrumb: 'Books › Literature & Fiction' }), true);
+  assert.equal(hasBookSignals([], { breadcrumb: 'Kindle Store › Kindle eBooks' }), true);
+  assert.equal(hasBookSignals([], { bookBinding: true }), true);
+});
+
+test('hasBookSignals: non-book product (Anker charger) — silent', () => {
+  const rows = [
+    { label: 'Product Dimensions', value: '3 x 2 x 1 inches' },
+    { label: 'Item Weight', value: '5 ounces' },
+    { label: 'Manufacturer', value: 'Anker' },
+    { label: 'ASIN', value: 'B0XXXXXXX' },
+  ];
+  assert.equal(hasBookSignals(rows, { breadcrumb: 'Electronics › Accessories', bookBinding: false }), false);
+});
+
+test('hasBookSignals: defensive on missing/garbage input', () => {
+  assert.equal(hasBookSignals(undefined, undefined), false);
+  assert.equal(hasBookSignals([{ value: 'no label' }], {}), false);
 });
 
 // ── normalizeTitle ──────────────────────────────────────────────────────────
