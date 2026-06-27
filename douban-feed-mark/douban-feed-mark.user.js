@@ -2,11 +2,13 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.1.1
+// @version      1.2.0
 // @author       lzblack
-// @description  在豆瓣首页广播流中，显示你对好友分享的书影音游戏的标记状态和评分
+// @description  在豆瓣广播流（首页 + 成员 statuses 页）中，显示你对好友分享的书影音游戏的标记状态和评分
 // @match        https://www.douban.com/
 // @match        https://www.douban.com/?*
+// @match        https://www.douban.com/people/*/statuses
+// @match        https://www.douban.com/people/*/statuses?*
 // @icon         https://img3.doubanio.com/favicon.ico
 // @icon64       https://img3.doubanio.com/favicon.ico
 // @grant        GM_getValue
@@ -306,11 +308,7 @@
 
   // ============ 主逻辑 ============
 
-  function init() {
-    log('初始化');
-    ensureStyles();
-    evictStale();
-
+  function scan() {
     // 扫描所有条目链接
     const links = document.querySelectorAll('a[href*="/subject/"]');
     const subjectMap = new Map();
@@ -372,6 +370,37 @@
     );
 
     processQueue(tasks, MAX_CONCURRENT).then(() => log('处理完成'));
+  }
+
+  // ============ 观察动态加载 ============
+
+  function debounce(fn, wait) {
+    let timer = null;
+    return function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(fn, wait);
+    };
+  }
+
+  function observeStream() {
+    const debouncedScan = debounce(scan, 400);
+    const observer = new MutationObserver(function (mutations) {
+      for (const m of mutations) {
+        if (m.addedNodes.length) {
+          debouncedScan();
+          return;
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function init() {
+    log('初始化');
+    ensureStyles();
+    evictStale();
+    scan();
+    observeStream();
   }
 
   // ============ 入口 ============
