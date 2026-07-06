@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>douban-title-mark-search — fixture</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; line-height: 1.7; }
+        h2 { margin-top: 2rem; font-size: 1rem; color: #333; }
+        .case { border: 1px solid #ddd; border-radius: 6px; padding: 0 1rem 1rem; margin: 1rem 0; }
+        #report { position: sticky; top: 0; background: #fff; padding: 0.75rem 1rem; border: 2px solid #007722;
+                  border-radius: 6px; margin-bottom: 1.5rem; }
+        .pass { color: #007722; font-weight: bold; }
+        .fail { color: #c0392b; font-weight: bold; }
+        .note { color: #888; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <div id="report">运行验证中……（脚本延时 500ms 处理，稍候）</div>
+
+    <!-- Case A: 报告里的真实结构。《》与标题被富文本编辑器拆到不同 inline 节点。
+         第一段 1 个书名号，第二段 2 个，共应生成 3 个搜索链接。 -->
+    <h2>Case A — 跨 inline 节点拆分的书名号（报告复现，douban.com/topic/492754611）</h2>
+    <div class="case">
+        <div class="rich-content topic-richtext">
+            <p><strong style="font-weight: bold;">朱迪・福斯特直言，苹果影业的《</strong>F1：狂飙飞车<strong style="font-weight: bold;">》给人的感觉就像是 “由人工智能拍出来的”。</strong></p>
+            <p><strong style="font-weight: bold;">“但我看《</strong>F1：狂飙飞车<strong style="font-weight: bold;">》这种电影的时候，心里就在想，《</strong>F1：狂飙飞车<strong style="font-weight: bold;">》其实是 AI 拍出来的吧？”</strong></p>
+        </div>
+    </div>
+
+    <!-- Case B: 对照组。《》与内容在同一文本节点内，旧逻辑本就支持，回归检查。 -->
+    <h2>Case B — 同节点书名号（回归对照，应生成 1 个链接）</h2>
+    <div class="case">
+        <p>我最近在读《三体》，很好看。</p>
+    </div>
+
+    <!-- Case C: 跨段落安全。第一段有未闭合的「《」，第二段单独有「》」。
+         不得跨块贪婪匹配，应生成 0 个链接。 -->
+    <h2>Case C — 未闭合《跨段落安全检查（应生成 0 个链接）</h2>
+    <div class="case">
+        <p>他说《这个标题没有闭合</p>
+        <p>然后这里才出现》一个孤立的收尾符</p>
+    </div>
+
+    <script src="./douban-title-mark-search.user.js"></script>
+    <script>
+        function searchLinks(root) {
+            return Array.from(root.querySelectorAll('a[href*="douban.com/search"]'));
+        }
+        function verify() {
+            const cases = document.querySelectorAll('.case');
+            const [a, b, c] = cases;
+            const aLinks = searchLinks(a);
+            const bLinks = searchLinks(b);
+            const cLinks = searchLinks(c);
+
+            // 幂等 / 结构完整性：链接内不得再嵌套链接；《》应仍以文本形式留在原处
+            const noNested = aLinks.every(l => l.querySelectorAll('a').length === 0);
+            const marksPreserved = a.textContent.match(/《/g)?.length === 3
+                                && a.textContent.match(/》/g)?.length === 3;
+            const aTexts = aLinks.map(l => l.textContent).join(' | ');
+
+            const checks = [
+                ['A: 3 个跨节点链接', aLinks.length === 3, `实得 ${aLinks.length}：${aTexts}`],
+                ['A: 链接文本均为 F1：狂飙飞车', aLinks.length > 0 && aLinks.every(l => l.textContent === 'F1：狂飙飞车'), aTexts],
+                ['A: 《》保留为文本（各 3 个）', marksPreserved, `《×${a.textContent.match(/《/g)?.length||0} 》×${a.textContent.match(/》/g)?.length||0}`],
+                ['A: 无嵌套链接（幂等）', noNested, noNested ? 'ok' : '发现嵌套 <a>'],
+                ['B: 同节点回归，1 个链接', bLinks.length === 1, `实得 ${bLinks.length}`],
+                ['C: 跨段落 0 个链接', cLinks.length === 0, `实得 ${cLinks.length}`],
+            ];
+
+            const allPass = checks.every(c => c[1]);
+            const rows = checks.map(([name, ok, detail]) =>
+                `<div><span class="${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</span> ${name} <span class="note">— ${detail}</span></div>`
+            ).join('');
+            document.getElementById('report').innerHTML =
+                `<div class="${allPass ? 'pass' : 'fail'}">${allPass ? '全部通过 ✓' : '存在失败 ✗'}</div>` + rows;
+        }
+        // 脚本延时 500ms 处理 body，留足余量后校验
+        setTimeout(verify, 1200);
+    </script>
+</body>
+</html>

@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - (Bug fixes will be listed here)
 
+## [1.2.4] - 2026-07-06
+
+### Fixed
+- 修复富文本广播中书名号《》被拆到不同 inline 节点（如 `<strong>`）时无法转链的问题。匹配范围由「单个文本节点」改为「块级容器内跨节点拼接」，再把命中内容按文本节点局部区间逐一包成链接，保留原有 `<strong>` 等结构。（复现：`douban.com/topic/492754611`）
+
+### Changed
+- 匹配缓冲区按最近块级祖先分段，防止未闭合的「《」跨段落贪婪匹配到下游「》」。
+- 幂等性改由「已生成搜索链接内的文本不再参与匹配」保证，移除不再需要的 `WeakSet` 标记。
+
 ## [1.2] - 2024-XX-XX
 
 ### Fixed
@@ -39,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 支持动态加载的内容（AJAX）
 - 性能优化，避免页面卡顿
 
-[Unreleased]: https://github.com/yourusername/douban-title-mark-search/compare/v1.2...HEAD
+[Unreleased]: https://github.com/yourusername/douban-title-mark-search/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/yourusername/douban-title-mark-search/compare/v1.2...v1.2.4
 [1.2]: https://github.com/yourusername/douban-title-mark-search/compare/v1.1...v1.2
 [1.1]: https://github.com/yourusername/douban-title-mark-search/releases/tag/v1.1
