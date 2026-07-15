@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.4
+// @version      1.0.5
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -406,8 +406,36 @@
     return cleanDescription(m ? full.slice(0, m.index).trim() : full);
   }
 
+  /** 「About the author」卡片（books-entity-teaser 组件，见 Slow AI/B0H89QJH5C）。
+   *  每位作者一个 .a-cardui-content；正文只读其中的段落，绕开卡片自带的
+   *  Follow 提示和 Read more/less 页脚。组件的模块类名带构建哈希（会随
+   *  Amazon 发版变），所以锚点用 h2#books-entity-teaser 和 a-cardui 框架类。 */
+  function extractAuthorCardBio() {
+    const teaser = document.querySelector('h2#books-entity-teaser');
+    const card = teaser && teaser.closest('div[data-card-metrics-id]');
+    if (!card) return '';
+    const units = [...card.querySelectorAll('.a-cardui-content')]
+      .map((content) => ({ name: authorUnitName(content, card), bio: descriptionBlockText(content) }))
+      .filter((u) => u.bio);
+    if (!units.length) return '';
+    // 单作者时正文即简介；多作者（carousel）时冠名，否则几段简介糊在一起读不出是谁。
+    const multi = units.length > 1;
+    return units.map((u) => (multi && u.name ? u.name + '\n' + u.bio : u.bio)).join('\n\n');
+  }
+
+  /** 卡片内某段简介所属的作者名：向上找到第一个含作者名 h2 的祖先（即该作者的栏），
+   *  这样 carousel 里每段简介都配到自己的名字。 */
+  function authorUnitName(content, card) {
+    for (let el = content.parentElement; el && el !== card; el = el.parentElement) {
+      const h = el.querySelector('h2:not(#books-entity-teaser)');
+      if (h) return cleanLabel(h.textContent);
+    }
+    return '';
+  }
+
   /** 作者简介：先取 #editorialReviews 的「About the Author」（Sapiens 式）；否则取简介
-   *  内嵌「About the author」小节之后的文本（Manning 式）；再退旧选择器。 */
+   *  内嵌「About the author」小节之后的文本（Manning 式）；再取 About the author 卡片；
+   *  最后退旧选择器。 */
   function extractAuthorBio() {
     const er = document.querySelector('#editorialReviews_feature_div');
     if (er) {
@@ -428,6 +456,8 @@
         if (bio) return bio;
       }
     }
+    const cardBio = extractAuthorCardBio();
+    if (cardBio) return cardBio;
     return firstText(['#authorBio_feature_div', '#bookAbout_feature_div .a-expander-content']);
   }
 
