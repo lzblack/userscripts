@@ -52,7 +52,8 @@
     game: 'game.douban.com',
   };
 
-  const IS_DOULIST = /^\/doulist\/\d+/.test(location.pathname);
+  // 覆盖 @match 下的所有 /doulist/ 路径（含 /doulist/ 索引页），否则会退回全页扫描
+  const IS_DOULIST = location.pathname.startsWith('/doulist/');
 
   const DISPLAY_MODE_KEY = 'dfm:displayMode';
 
