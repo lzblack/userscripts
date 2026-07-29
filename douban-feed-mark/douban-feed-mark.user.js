@@ -2,13 +2,14 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.2.0
+// @version      1.3.0
 // @author       lzblack
-// @description  在豆瓣广播流（首页 + 成员 statuses 页）中，显示你对好友分享的书影音游戏的标记状态和评分
+// @description  在豆瓣广播流（首页 + 成员 statuses 页）和豆列页中，显示你对条目的标记状态和评分
 // @match        https://www.douban.com/
 // @match        https://www.douban.com/?*
 // @match        https://www.douban.com/people/*/statuses
 // @match        https://www.douban.com/people/*/statuses?*
+// @match        https://www.douban.com/doulist/*
 // @icon         https://img3.doubanio.com/favicon.ico
 // @icon64       https://img3.doubanio.com/favicon.ico
 // @grant        GM_getValue
@@ -50,6 +51,8 @@
     music: 'music.douban.com',
     game: 'game.douban.com',
   };
+
+  const IS_DOULIST = /^\/doulist\/\d+/.test(location.pathname);
 
   const DISPLAY_MODE_KEY = 'dfm:displayMode';
 
@@ -258,6 +261,14 @@
 
   // ============ 渲染 ============
 
+  // 印章的落点：广播流是卡片内容区，豆列是条目的书影音信息块（封面 + 标题 + 简介）
+  function findStampHost(link) {
+    const doulistItem = link.closest('.doulist-item');
+    if (doulistItem) return doulistItem.querySelector('.doulist-subject');
+    const card = link.closest('.block-subject');
+    return card ? card.querySelector('.content') : null;
+  }
+
   function renderTag(link, status, rating, category) {
     const labels = STATUS_LABELS[category];
     if (!labels || !status || !labels[status]) return;
@@ -274,8 +285,7 @@
     }
 
     // 印章模式：绝对定位在内容区
-    const card = link.closest('.block-subject');
-    const content = card ? card.querySelector('.content') : null;
+    const content = findStampHost(link);
     if (!content) return;
     if (content.querySelector('.dfm-wrapper')) return;
 
@@ -308,19 +318,42 @@
 
   // ============ 主逻辑 ============
 
-  function scan() {
-    // 扫描所有条目链接
-    const links = document.querySelectorAll('a[href*="/subject/"]');
-    const subjectMap = new Map();
-
-    for (const link of links) {
+  // 广播流：全页扫条目链接
+  function collectFeedTargets() {
+    const targets = [];
+    for (const link of document.querySelectorAll('a[href*="/subject/"]')) {
       if (link.dataset.dfmDone) continue;
       // 只处理有文字内容的链接（跳过纯图片链接如海报）
       if (!link.textContent.trim()) continue;
       const id = getSubjectId(link.href);
       const category = getCategoryFromUrl(link.href);
       if (!id || !category) continue;
+      targets.push({ link, id, category });
+    }
+    return targets;
+  }
 
+  // 豆列：只取条目卡片里的标题链接，避开侧栏「相关豆列」「喜欢的人也喜欢」等噪声。
+  // 书影音条目的链接都带子域，类别直接从 URL 读；豆列里也收影评／日记／网页等
+  // 非条目内容，getCategoryFromUrl 返回 null 就跳过，不猜类别。
+  function collectDoulistTargets() {
+    const targets = [];
+    for (const item of document.querySelectorAll('.doulist-item')) {
+      const link = item.querySelector('.title a[href]');
+      if (!link || link.dataset.dfmDone) continue;
+      const id = getSubjectId(link.href);
+      const category = getCategoryFromUrl(link.href);
+      if (!id || !category) continue;
+      targets.push({ link, id, category });
+    }
+    return targets;
+  }
+
+  function scan() {
+    const targets = IS_DOULIST ? collectDoulistTargets() : collectFeedTargets();
+    const subjectMap = new Map();
+
+    for (const { link, id, category } of targets) {
       link.dataset.dfmDone = '1';
 
       if (!subjectMap.has(id)) {
