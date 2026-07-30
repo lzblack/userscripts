@@ -2,9 +2,9 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.3.0
+// @version      1.4.0
 // @author       lzblack
-// @description  在豆瓣广播流（首页 + 成员 statuses 页）和豆列页中，显示你对条目的标记状态和评分
+// @description  在豆瓣广播流（首页 + 成员 statuses 页）和豆列页中，显示你对书影音游戏条目的标记状态和评分
 // @match        https://www.douban.com/
 // @match        https://www.douban.com/?*
 // @match        https://www.douban.com/people/*/statuses
@@ -21,7 +21,7 @@
 // @connect      book.douban.com
 // @connect      movie.douban.com
 // @connect      music.douban.com
-// @connect      game.douban.com
+// @connect      www.douban.com
 // @supportURL   https://github.com/lzblack/userscripts/issues
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-feed-mark/douban-feed-mark.user.js
@@ -33,7 +33,9 @@
 
   // ============ 常量 ============
 
-  const CACHE_PREFIX = 'dfm:v2:';
+  // v3：缓存键加了 category 前缀。游戏走 ilmen 的 id 空间，和书影音的 subject id
+  // 是两套编号（10759791 在两边都能解析），不隔离会把书的状态盖到游戏上。
+  const CACHE_PREFIX = 'dfm:v3:';
   const CACHE_TTL_MARKED = 7 * 24 * 60 * 60 * 1000;
   const CACHE_TTL_UNMARKED = 24 * 60 * 60 * 1000;
   const MAX_CONCURRENT = 3;
@@ -49,8 +51,23 @@
     book: 'book.douban.com',
     movie: 'movie.douban.com',
     music: 'music.douban.com',
-    game: 'game.douban.com',
   };
+
+  // 豆列里的游戏条目链接是裸的 www.douban.com/subject/{id}/，URL 上读不出类别，
+  // 只能看 .abstract 里的「类别: 游戏」。书影音条目一律带子域、也不带这一行
+  // （13 个豆列 315 个条目实测），所以这里只需要认游戏。
+  const ABSTRACT_CATEGORIES = {
+    '游戏': 'game',
+  };
+
+  // ── node 测试导出（在任何 GM_/location 调用之前 return） ──────────────────
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      getCategoryFromUrl, getCategoryFromItem, getSubjectId,
+      cacheKey, interestUrl, parseIlmenInterest,
+    };
+    return;
+  }
 
   // 覆盖 @match 下的所有 /doulist/ 路径（含 /doulist/ 索引页），否则会退回全页扫描
   const IS_DOULIST = location.pathname.startsWith('/doulist/');
@@ -83,12 +100,20 @@
     if (url.includes('book.douban.com')) return 'book';
     if (url.includes('movie.douban.com')) return 'movie';
     if (url.includes('music.douban.com')) return 'music';
-    if (url.includes('game.douban.com')) return 'game';
+    // 游戏没有自己的子域（game.douban.com 根本不解析），条目页是 www.douban.com/game/{id}/
+    if (/\/\/www\.douban\.com\/game\/\d+/.test(url)) return 'game';
     return null;
   }
 
+  function getCategoryFromItem(item) {
+    const abstract = item.querySelector('.abstract');
+    const match = abstract && abstract.textContent.match(/类别:\s*(\S+)/);
+    // 豆列里也收影评／日记／网页等非条目内容，映射不到就跳过，不猜类别
+    return match ? ABSTRACT_CATEGORIES[match[1]] || null : null;
+  }
+
   function getSubjectId(url) {
-    const match = url.match(/\/subject\/(\d+)/);
+    const match = url.match(/\/(?:subject|game)\/(\d+)/);
     return match ? match[1] : null;
   }
 
@@ -99,19 +124,24 @@
 
   // ============ 缓存 ============
 
-  function getCache(subjectId) {
-    const entry = GM_getValue(CACHE_PREFIX + subjectId);
+  function cacheKey(subjectId, category) {
+    return `${CACHE_PREFIX}${category}:${subjectId}`;
+  }
+
+  function getCache(subjectId, category) {
+    const key = cacheKey(subjectId, category);
+    const entry = GM_getValue(key);
     if (!entry) return null;
     if (Date.now() > entry.fetchedAt + entry.ttl) {
-      GM_deleteValue(CACHE_PREFIX + subjectId);
+      GM_deleteValue(key);
       return null;
     }
     return entry;
   }
 
-  function setCache(subjectId, status, rating) {
+  function setCache(subjectId, category, status, rating) {
     const ttl = status ? CACHE_TTL_MARKED : CACHE_TTL_UNMARKED;
-    GM_setValue(CACHE_PREFIX + subjectId, {
+    GM_setValue(cacheKey(subjectId, category), {
       fetchedAt: Date.now(),
       ttl,
       status,
@@ -122,6 +152,11 @@
   function evictStale() {
     const now = Date.now();
     for (const key of GM_listValues()) {
+      // v2 的键没有 category 前缀，换 v3 后永远不会再被读到，顺手清掉
+      if (key.startsWith('dfm:v2:')) {
+        GM_deleteValue(key);
+        continue;
+      }
       if (!key.startsWith(CACHE_PREFIX)) continue;
       const entry = GM_getValue(key);
       if (!entry || now > entry.fetchedAt + entry.ttl) {
@@ -132,10 +167,45 @@
 
   // ============ API ============
 
-  function fetchInterest(subjectId, category) {
+  // 书影音：子域的 /j/subject/{id}/interest，返回 interest_status + 一段 html
+  function parseSubjectInterest(data) {
+    let status = data.interest_status || null;
+    let rating = 0;
+    if (data.html) {
+      const doc = new DOMParser().parseFromString(data.html, 'text/html');
+      if (!status) {
+        const checked = doc.querySelector('input[name="interest"]:checked');
+        status = checked ? checked.value || null : null;
+      }
+      if (status) {
+        const ratingEl = doc.querySelector('#n_rating');
+        rating = ratingEl ? parseInt(ratingEl.value, 10) || 0 : 0;
+      }
+    }
+    return { status, rating };
+  }
+
+  // 游戏：www 的 /j/ilmen/thing/{id}/interest，字段完全不同。
+  // 实测未标记时 action 为 null、is_modify 为 false；标记过则 action 是
+  // wish/do/collect 且 is_modify 为 true。两个条件都要满足才算标过。
+  function parseIlmenInterest(data) {
+    if (data.r) return { status: null, rating: 0 };
+    const status = data.is_modify && data.action ? data.action : null;
+    const rating = status ? parseInt(data.rating, 10) || 0 : 0;
+    return { status, rating };
+  }
+
+  function interestUrl(subjectId, category) {
+    if (category === 'game') {
+      return `https://www.douban.com/j/ilmen/thing/${subjectId}/interest`;
+    }
     const host = CATEGORY_HOSTS[category];
-    if (!host) return Promise.resolve({ status: null, rating: null });
-    const url = `https://${host}/j/subject/${subjectId}/interest`;
+    return host ? `https://${host}/j/subject/${subjectId}/interest` : null;
+  }
+
+  function fetchInterest(subjectId, category) {
+    const url = interestUrl(subjectId, category);
+    if (!url) return Promise.resolve({ status: null, rating: null });
 
     return new Promise(function (resolve) {
       GM_xmlhttpRequest({
@@ -149,20 +219,9 @@
               return;
             }
             const data = JSON.parse(resp.responseText);
-            let status = data.interest_status || null;
-            let rating = 0;
-            if (data.html) {
-              const doc = new DOMParser().parseFromString(data.html, 'text/html');
-              if (!status) {
-                const checked = doc.querySelector('input[name="interest"]:checked');
-                status = checked ? checked.value || null : null;
-              }
-              if (status) {
-                const ratingEl = doc.querySelector('#n_rating');
-                rating = ratingEl ? parseInt(ratingEl.value, 10) || 0 : 0;
-              }
-            }
-            resolve({ status, rating });
+            resolve(category === 'game'
+              ? parseIlmenInterest(data)
+              : parseSubjectInterest(data));
           } catch (e) {
             log('解析失败:', subjectId, e);
             resolve({ status: null, rating: null });
@@ -319,10 +378,10 @@
 
   // ============ 主逻辑 ============
 
-  // 广播流：全页扫条目链接
+  // 广播流：全页扫条目链接。游戏条目页是 /game/{id}/，不带 /subject/
   function collectFeedTargets() {
     const targets = [];
-    for (const link of document.querySelectorAll('a[href*="/subject/"]')) {
+    for (const link of document.querySelectorAll('a[href*="/subject/"], a[href*="/game/"]')) {
       if (link.dataset.dfmDone) continue;
       // 只处理有文字内容的链接（跳过纯图片链接如海报）
       if (!link.textContent.trim()) continue;
@@ -335,15 +394,14 @@
   }
 
   // 豆列：只取条目卡片里的标题链接，避开侧栏「相关豆列」「喜欢的人也喜欢」等噪声。
-  // 书影音条目的链接都带子域，类别直接从 URL 读；豆列里也收影评／日记／网页等
-  // 非条目内容，getCategoryFromUrl 返回 null 就跳过，不猜类别。
+  // 书影音条目的链接都带子域，类别直接从 URL 读；游戏条目是裸 URL，退回读 .abstract。
   function collectDoulistTargets() {
     const targets = [];
     for (const item of document.querySelectorAll('.doulist-item')) {
       const link = item.querySelector('.title a[href]');
       if (!link || link.dataset.dfmDone) continue;
       const id = getSubjectId(link.href);
-      const category = getCategoryFromUrl(link.href);
+      const category = getCategoryFromUrl(link.href) || getCategoryFromItem(item);
       if (!id || !category) continue;
       targets.push({ link, id, category });
     }
@@ -354,13 +412,15 @@
     const targets = IS_DOULIST ? collectDoulistTargets() : collectFeedTargets();
     const subjectMap = new Map();
 
+    // 按 category:id 去重——游戏和书影音是两套 id 编号，同一个数字可能各指一个条目
     for (const { link, id, category } of targets) {
       link.dataset.dfmDone = '1';
 
-      if (!subjectMap.has(id)) {
-        subjectMap.set(id, { category, links: [] });
+      const key = `${category}:${id}`;
+      if (!subjectMap.has(key)) {
+        subjectMap.set(key, { id, category, links: [] });
       }
-      subjectMap.get(id).links.push(link);
+      subjectMap.get(key).links.push(link);
     }
 
     if (subjectMap.size === 0) {
@@ -372,8 +432,8 @@
     // 查缓存 + 构建请求队列
     const toFetch = [];
 
-    for (const [id, info] of subjectMap) {
-      const cached = getCache(id);
+    for (const info of subjectMap.values()) {
+      const cached = getCache(info.id, info.category);
       if (cached) {
         if (cached.status) {
           for (const link of info.links) {
@@ -381,7 +441,7 @@
           }
         }
       } else {
-        toFetch.push({ id, info });
+        toFetch.push(info);
       }
     }
 
@@ -392,9 +452,9 @@
     log('需要请求', toFetch.length, '个条目');
 
     // 并发请求
-    const tasks = toFetch.map(({ id, info }) => () =>
-      fetchInterest(id, info.category).then(function (result) {
-        setCache(id, result.status, result.rating);
+    const tasks = toFetch.map((info) => () =>
+      fetchInterest(info.id, info.category).then(function (result) {
+        setCache(info.id, info.category, result.status, result.rating);
         if (result.status) {
           for (const link of info.links) {
             renderTag(link, result.status, result.rating, info.category);
