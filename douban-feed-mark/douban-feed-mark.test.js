@@ -38,6 +38,10 @@ test('getCategoryFromUrl: 认不出来就返回 null，绝不猜', () => {
 
 test('getCategoryFromItem: 只认「类别: 游戏」', () => {
   assert.equal(getCategoryFromItem(itemWithAbstract('类别: 游戏\n2001年SCEJ发行')), 'game');
+  // 冒号写法的变体：排版扩展会插空格，实际页面上出现过「类别 : 游戏」
+  assert.equal(getCategoryFromItem(itemWithAbstract('\n      \n          类别 : 游戏\n')), 'game');
+  assert.equal(getCategoryFromItem(itemWithAbstract('类别：游戏')), 'game');
+  assert.equal(getCategoryFromItem(itemWithAbstract('类别 ： 游戏')), 'game');
   // 书影音条目根本不带这一行（13 个豆列 315 条实测），带别的类别一律跳过
   assert.equal(getCategoryFromItem(itemWithAbstract('作者: 博尔赫斯\n出版社: 浙江文艺')), null);
   assert.equal(getCategoryFromItem(itemWithAbstract('类别: 网页')), null);

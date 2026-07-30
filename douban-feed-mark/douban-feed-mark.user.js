@@ -2,7 +2,7 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.4.0
+// @version      1.4.1
 // @author       lzblack
 // @description  在豆瓣广播流（首页 + 成员 statuses 页）和豆列页中，显示你对书影音游戏条目的标记状态和评分
 // @match        https://www.douban.com/
@@ -107,7 +107,9 @@
 
   function getCategoryFromItem(item) {
     const abstract = item.querySelector('.abstract');
-    const match = abstract && abstract.textContent.match(/类别:\s*(\S+)/);
+    // 冒号两侧的空格、以及全角冒号都要容忍：页面上实际出现过「类别 : 游戏」
+    // （排版类扩展会在标点前后插空格），卡在这里会让整页游戏条目全被跳过
+    const match = abstract && abstract.textContent.match(/类别\s*[:：]\s*(\S+)/);
     // 豆列里也收影评／日记／网页等非条目内容，映射不到就跳过，不猜类别
     return match ? ABSTRACT_CATEGORIES[match[1]] || null : null;
   }
