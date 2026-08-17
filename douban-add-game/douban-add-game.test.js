@@ -13,7 +13,8 @@ const {
   isTitleMatch,
   mapGenres,
   mapPlatforms,
-  coverUrl,
+  coverCandidates,
+  isSupportedType,
   isPayloadFresh,
   parseGameSearchResults,
   buildPayload,
@@ -34,6 +35,8 @@ const HADES_ZH = {
     '<ul class="bb_ul"><li>肉鸽式玩法<br></li><li>数千种武器组合<br></li></ul>' +
     '<img src="https://x/img.jpg">Supergiant &amp; Co.',
   website: 'http://www.supergiantgames.com',
+  header_image:
+    'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1145360/header.jpg?t=1758127023',
   developers: ['Supergiant Games'],
   publishers: ['Supergiant Games'],
   platforms: { windows: true, mac: true, linux: false },
@@ -181,13 +184,46 @@ test('mapPlatforms: 只映射 Steam 能确知的三个', () => {
 });
 
 // ── 封面 ────────────────────────────────────────────────────────────────────
-test('coverUrl: 优先竖版 library capsule，缺 appid 时退 header', () => {
-  assert.equal(
-    coverUrl(1145360, 'https://shared.akamai.steamstatic.com/.../header.jpg'),
-    'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1145360/library_600x900_2x.jpg'
-  );
-  assert.equal(coverUrl(null, 'https://x/header.jpg'), 'https://x/header.jpg');
-  assert.equal(coverUrl(null, ''), '');
+const A = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps';
+
+test('coverCandidates: 两种基址同源时去重，竖版优先、header 兜底', () => {
+  assert.deepEqual(coverCandidates(`${A}/1145360/header.jpg?t=1758127023`, 1145360), [
+    `${A}/1145360/library_600x900_2x.jpg`,
+    `${A}/1145360/library_600x900.jpg`,
+    `${A}/1145360/header.jpg?t=1758127023`,
+  ]);
+});
+
+test('coverCandidates: 带哈希段时哈希基址与 appid 裸基址都要试', () => {
+  // 实测 3807750 的 header 在 .../apps/3807750/d0e9…/ 下；而 1091500 反过来，
+  // 竖版只存在于 appid 裸路径上——所以两条都得进候选。
+  const hash = 'd0e999375da882ad74494708486dc3e3db7344cd';
+  const hashed = `${A}/3807750/${hash}/header.jpg?t=1786979515`;
+  assert.deepEqual(coverCandidates(hashed, 3807750), [
+    `${A}/3807750/${hash}/library_600x900_2x.jpg`,
+    `${A}/3807750/library_600x900_2x.jpg`,
+    `${A}/3807750/${hash}/library_600x900.jpg`,
+    `${A}/3807750/library_600x900.jpg`,
+    hashed,
+  ]);
+});
+
+test('coverCandidates: 无 header 时仍可凭 appid 试竖版；两者皆无则空', () => {
+  assert.deepEqual(coverCandidates('', 1145360), [
+    `${A}/1145360/library_600x900_2x.jpg`,
+    `${A}/1145360/library_600x900.jpg`,
+  ]);
+  assert.deepEqual(coverCandidates('', null), []);
+  assert.deepEqual(coverCandidates(null, null), []);
+  assert.deepEqual(coverCandidates('https://x/weird', null), ['https://x/weird']);
+});
+
+test('isSupportedType: 只接 game，DLC/原声带/demo 一律不接', () => {
+  assert.equal(isSupportedType('game'), true);
+  assert.equal(isSupportedType('music'), false); // 1206340 Hades Original Soundtrack
+  assert.equal(isSupportedType('dlc'), false);
+  assert.equal(isSupportedType('demo'), false);
+  assert.equal(isSupportedType(undefined), false);
 });
 
 // ── isPayloadFresh ──────────────────────────────────────────────────────────
@@ -216,6 +252,8 @@ test('buildPayload: 无中文名时中英同名，别名为空', () => {
   assert.deepEqual(p.platforms.map((x) => x.id), [94, 17]);
   assert.equal(p.website, 'http://www.supergiantgames.com');
   assert.ok(p.description.startsWith('Hades 是一款高自由度砍杀型地下城游戏。'));
+  assert.equal(p.coverCandidates.length, 3);
+  assert.ok(p.coverCandidates[0].endsWith('/1145360/library_600x900_2x.jpg'));
   assert.equal(p.source.name, 'steam');
   assert.equal(p.source.capturedAt, AT);
 });
