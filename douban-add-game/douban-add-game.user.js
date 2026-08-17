@@ -145,6 +145,16 @@
   const HAS_CJK_RE = /[一-鿿]/;
 
   /**
+   * 剥掉整对包住标题的书名号——Steam 的中文商店名有时自带（实测 2584270 的
+   * schinese name 就是「《致命躯壳 II》」），而豆瓣条目名一律不带。
+   * 只在《》正好包住整串且中间没有别的》时才剥，免得把「《一》与《二》」削成「一》与《二」。
+   */
+  function stripOuterBrackets(input) {
+    const s = str(input);
+    return /^《[^》]*》$/.test(s) ? s.slice(1, -1).trim() : s;
+  }
+
+  /**
    * 取标题里的「英文段」：按空白切开后丢掉含 CJK 的词块。
    * 豆瓣把序号写在中文名上（「哈迪斯2 Hades II」），直接整串归一会得到
    * '2hadesii'，和英文名 'hadesii' 对不上——而续作常常没有中文商店名，
@@ -297,7 +307,7 @@
     const appid = o.appid || null;
     const warnings = [];
 
-    const title = str(zh.name).trim();
+    const title = stripOuterBrackets(str(zh.name).trim());
     const titleEn = str(en && en.name).trim() || title;
     const hasChineseName = normalizeCjk(title) !== '';
     if (!hasChineseName) warnings.push('缺中文名（豆瓣游戏条目通常用中文名，请人工补）');
@@ -402,7 +412,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       parseAppId, parseDate, htmlToText, decodeEntities,
-      normalizeLatin, normalizeCjk, latinSegment, isTitleMatch, isSearchResultsPage,
+      normalizeLatin, normalizeCjk, latinSegment, stripOuterBrackets, isTitleMatch, isSearchResultsPage,
       mapGenres, mapPlatforms, coverCandidates, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
       GENRE_MAP, PLATFORM_MAP, FIELD,

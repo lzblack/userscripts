@@ -287,6 +287,15 @@ test('buildPayload: 有中文名时正标题用中文、英文名进别名', () 
   assert.deepEqual(p.releaseDate, { y: 2024, m: 8, d: 19 });
 });
 
+test('buildPayload: 剥掉 Steam 中文名自带的整对书名号', () => {
+  // 实测 2584270 的 schinese name 就是「《致命躯壳 II》」；豆瓣条目名不带书名号。
+  const p = build({ ...WUKONG_ZH, name: '《致命躯壳 II》' }, { ...WUKONG_EN, name: 'Mortal Shell II' }, 2584270);
+  assert.equal(p.title, '致命躯壳 II');
+  // 只剥完整包住整个标题的那一对，名字内部的书名号不动
+  assert.equal(build({ ...WUKONG_ZH, name: '重返《魔兽世界》' }, WUKONG_EN, 1).title, '重返《魔兽世界》');
+  assert.equal(build({ ...WUKONG_ZH, name: '《一》与《二》' }, WUKONG_EN, 1).title, '《一》与《二》');
+});
+
 test('buildPayload: 未发售走 comingSoon，日期可为 null', () => {
   const zh = { ...HADES_ZH, release_date: { coming_soon: true, date: '即将推出' } };
   const en = { name: 'Hades', release_date: { coming_soon: true, date: 'Coming soon' } };
