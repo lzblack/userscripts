@@ -480,10 +480,18 @@ test('groupControls: 提示语与「年/月/日」不夺走归属', () => {
   assert.equal(g.groups['中文名称'].length, 1); // 没被提示语吞掉
 });
 
-test('groupControls: 复选框自身没带文字时，取紧邻的前一个标签', () => {
-  // <label for=x>PC</label><input id=x type=checkbox> 这种写法
-  const g = groupControls([L('平台'), L('PC'), C('checkbox'), L('Mac'), C('checkbox')]);
-  assert.deepEqual(g.groups['平台'].map((c) => c.text), ['PC', 'Mac']);
+test('groupControls: 名字取不到时留空，绝不拿上一个标签顶替', () => {
+  // 这两种形状在 token 层完全同形，猜「上一个标签」就会把提示语当成选项名：
+  //   [平台][必填，该游戏可运行的平台][□]  ← 上一个标签是提示语
+  //   [平台][PC][□]                        ← 上一个标签是选项名
+  // 所以宁可留空、让它匹配不上并如实报「没找到控件」。
+  // 名字由 DOM 侧的 controlText() 从 label 结构里取，正常页面走不到这条分支。
+  const g = groupControls([L('平台'), L('必填，该游戏可运行的平台'), C('checkbox')]);
+  assert.equal(g.groups['平台'][0].text, '');
+  assert.deepEqual(
+    groupControls([L('平台'), C('checkbox', 'PC'), C('checkbox', 'Mac')]).groups['平台'].map((c) => c.text),
+    ['PC', 'Mac']
+  );
 });
 
 test('groupControls: 标签的空白与必填标记不影响匹配', () => {
