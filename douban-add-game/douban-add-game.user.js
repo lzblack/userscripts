@@ -383,4 +383,222 @@
     };
     return;
   }
+
+  // ============================================================
+  // 运行期：配置 + GM 封装
+  // ============================================================
+
+  const STORAGE_KEY = 'dag:pending';
+  const COVER_KEY = 'dag:cover';
+  const TTL_MS = 10 * 60 * 1000;
+  const CREATE_BASE = 'https://www.douban.com/game/create';
+  const SEARCH_BASE = 'https://www.douban.com/search?cat=3114&q=';
+  const HIGHLIGHT_SHADOW = '0 0 0 3px rgba(46,125,50,.6)'; // 绿色「该点这个」描边
+
+  const deps = {
+    // 默认带 cookie：跨域目标是豆瓣，登录态既是 /game/create 的前提，
+    // 也是对抗搜索接口风控的主要手段。匿名请求请显式传 anonymous:true。
+    request(url, opts = {}) {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: opts.method || 'GET',
+          url,
+          headers: opts.headers || {},
+          timeout: opts.timeout || 15000,
+          responseType: opts.responseType || undefined,
+          anonymous: opts.anonymous === true,
+          onload: resolve,
+          onerror: () => reject(new Error('request failed: ' + url)),
+          ontimeout: () => reject(new Error('request timeout: ' + url)),
+        });
+      });
+    },
+  };
+
+  function escapeHtml(input) {
+    return str(input)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function safeLinkUrl(input) {
+    const url = str(input).trim();
+    return /^https?:\/\//i.test(url) ? url : '#';
+  }
+
+  // ============================================================
+  // Steam 适配器：appdetails API → canonical payload（完全不刮 DOM）
+  // ============================================================
+
+  /** 取一份 appdetails；下架/区域封锁/非游戏条目（success:false）返回 null。 */
+  async function fetchAppDetails(appid, lang) {
+    try {
+      const resp = await deps.request(
+        `https://store.steampowered.com/api/appdetails?appids=${appid}&l=${lang}`
+      );
+      const json = JSON.parse(resp.responseText);
+      const entry = json && json[String(appid)];
+      return entry && entry.success ? entry.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ============================================================
+  // 豆瓣查重服务（与来源无关）
+  // ============================================================
+
+  /** 单次搜索；风控/网络失败抛出，由 dedup 统一收成 error 态。 */
+  async function searchDouban(query) {
+    const resp = await deps.request(SEARCH_BASE + encodeURIComponent(query));
+    if (resp.status !== 200) throw new Error('douban search status ' + resp.status);
+    return parseGameSearchResults(resp.responseText);
+  }
+
+  /** 英文名、（若不同）中文名各查一次后合并判定。任一次失败即整体 error。 */
+  async function dedup(payload) {
+    const queries = [...new Set([payload.titleEn, payload.title].filter(Boolean))];
+    let items = [];
+    try {
+      for (const q of queries) items = items.concat(await searchDouban(q));
+    } catch {
+      return { kind: 'error' };
+    }
+    return classifyDedup(payload, items);
+  }
+
+  // ============================================================
+  // 跨域交接
+  // ============================================================
+
+  function stashAndOpen(payload) {
+    GM_setValue(STORAGE_KEY, JSON.stringify(payload));
+    GM_openInTab(`${CREATE_BASE}?thing_name=${encodeURIComponent(payload.title)}`, {
+      active: true,
+      insert: true,
+    });
+  }
+
+  // ============================================================
+  // Steam 侧角标 UI
+  // ============================================================
+
+  const BADGE_ID = 'dag-badge';
+
+  function fieldSummaryHtml(p) {
+    const date = p.releaseDate
+      ? [p.releaseDate.y, p.releaseDate.m, p.releaseDate.d].filter(Boolean).join('-')
+      : '—';
+    const rows = [
+      ['游戏名称', p.title],
+      ['别名', p.aliases.length ? p.aliases.join(' / ') : '—'],
+      ['开发商', p.developers.join(' / ') || '—'],
+      ['发行商', p.publishers.join(' / ') || '—'],
+      [p.comingSoon ? '预计上市' : '发行日期', date],
+      ['类型', p.genres.map((g) => g.name).join(' / ') || '（无对应）'],
+      ['平台', p.platforms.map((x) => x.name).join(' / ') || '—'],
+      ['官方网站', p.website || '—'],
+      ['简介', p.description ? `${p.description.length} 字` : '（缺失）'],
+    ];
+    return rows
+      .map(([k, v]) => `<div style="display:flex;gap:8px"><b style="flex:0 0 64px;color:#666">${k}</b><span>${escapeHtml(String(v))}</span></div>`)
+      .join('');
+  }
+
+  function ensureBadge() {
+    let box = document.getElementById(BADGE_ID);
+    if (box) return box;
+    box = document.createElement('div');
+    box.id = BADGE_ID;
+    box.style.cssText =
+      'margin:12px 0;padding:12px 14px;border:1px solid #d6c79b;border-radius:8px;' +
+      'background:#fcf9ef;font-size:13px;line-height:1.6;color:#333;max-width:640px';
+    // 主锚点：塞进标题条容器内部（实测落在 top≈506px 首屏内，且 x 与正文栏对齐；
+    // 插到它后面会落进全宽的 .page_top_area，左边缘顶到 x=0 跟页面栅格错开）。
+    // 左侧正文栏是次选——它自己就在 1165px 处，要滚动才看得到。
+    const titleArea = document.querySelector('.page_title_area');
+    const leftcol = document.querySelector('.leftcol.game_description_column');
+    if (titleArea) {
+      titleArea.appendChild(box);
+    } else if (leftcol) {
+      leftcol.insertBefore(box, leftcol.firstChild);
+    } else {
+      box.style.cssText += ';position:fixed;top:12px;right:12px;z-index:99999;box-shadow:0 2px 12px rgba(0,0,0,.4)';
+      document.body.appendChild(box);
+    }
+    return box;
+  }
+
+  function itemLink(it) {
+    const rating = it.rating ? ` ${escapeHtml(it.rating)} 分` : '';
+    return `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.title)}</a>${rating}`;
+  }
+
+  function renderBadge(state, payload, result) {
+    const box = ensureBadge();
+    let head = '';
+    let action = '';
+
+    if (state === 'loading') {
+      head = '<b>豆瓣查重中…</b>';
+    } else if (state === 'error') {
+      const q = encodeURIComponent(payload ? payload.titleEn : '');
+      head = `<b style="color:#c0392b">查重失败</b>（风控/网络）· <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener">手动搜索 →</a>`;
+    } else if (state === 'hit') {
+      head = `<b style="color:#2e7d32">✓ 豆瓣已收录</b> · ${itemLink(result.item)}`;
+    } else if (state === 'maybe') {
+      // 游戏没有 ISBN 这种主键，「名字对不上」不等于「豆瓣没有」，故先摆证据再给按钮。
+      head =
+        '<b style="color:#b8860b">豆瓣有名字相近的条目</b>，请先确认不是同一款：<div style="margin-top:4px">' +
+        result.items.map(itemLink).join('　') +
+        '</div>';
+    } else if (state === 'none') {
+      head = '<b>豆瓣没搜到</b>　<span style="color:#888">（搜不到不等于一定没有，仍请扫一眼豆瓣）</span>';
+    }
+
+    if (state === 'maybe' || state === 'none') {
+      const label = state === 'maybe' ? '都不是，去添加' : '+ 添加到豆瓣';
+      action = `<div style="margin-top:10px"><button id="dag-add" style="cursor:pointer;padding:6px 14px;border:0;border-radius:6px;background:#2e7d32;color:#fff;font-size:13px">${label}</button></div>`;
+    }
+
+    const summary = payload
+      ? `<div style="margin-top:10px;border-top:1px dashed #e0d6b0;padding-top:8px">${fieldSummaryHtml(payload)}</div>`
+      : '';
+    // 只在真要添加时列告警——已收录的条目不用管抓取缺了什么。
+    const plan = payload && (state === 'maybe' || state === 'none') ? buildFillPlan(payload) : null;
+    const warn = plan && plan.warnings.length
+      ? `<div style="margin-top:8px;color:#b8500b">${plan.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('<br>')}</div>`
+      : '';
+    box.innerHTML = `<div>${head}</div>${warn}${action}${summary}`;
+
+    const btn = box.querySelector('#dag-add');
+    if (btn) btn.addEventListener('click', () => stashAndOpen(payload));
+  }
+
+  async function runSteam() {
+    const appid = parseAppId(location.pathname);
+    if (!appid) return;
+
+    const [zh, en] = await Promise.all([
+      fetchAppDetails(appid, 'schinese'),
+      fetchAppDetails(appid, 'english'),
+    ]);
+    if (!zh) return; // 下架 / 区域封锁：静默早退
+    if (!isSupportedType(zh.type)) return; // DLC / 原声带 / demo：静默早退
+
+    const payload = buildPayload({
+      zh, en, appid, url: `https://store.steampowered.com/app/${appid}/`, now: Date.now(),
+    });
+    renderBadge('loading', payload, null);
+    const result = await dedup(payload);
+    renderBadge(result.kind, payload, result);
+  }
+
+  // ============================================================
+  // 分派
+  // ============================================================
+
+  if (location.hostname === 'store.steampowered.com') {
+    runSteam();
+  }
 })();
