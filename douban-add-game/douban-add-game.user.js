@@ -432,6 +432,64 @@
     return { texts, textareas, genres, platforms, date, manual, warnings, filled, skipped };
   }
 
+  /** 标签归一：去掉全部空白、尾随冒号、必填标记，再做精确比较。 */
+  function normLabel(input) {
+    return str(input).replace(/\s+/g, '').replace(/[*＊]/g, '').replace(/[:：]$/, '');
+  }
+
+  const FIELD_LABELS = Object.values(FIELD).concat(['图标']);
+
+  /**
+   * 把线性化的表单 token 流按「最近的前驱字段标签」归组。
+   *
+   * 刻意不写 `.item > label` 这类结构选择器：豆瓣建条目页的 HTML 没到手，
+   * 而这个算法对 table / div / dl 任何一种排版都成立——只要标签在控件前面出现过。
+   * 只有 FIELD_LABELS 里的标签会开新组，所以提示语、复选框自带的「PC」「动作」、
+   * 以及日期后面的「年/月/日」都只是过路 token，不会截断分组。
+   *
+   * token: {kind:'label', text} | {kind:'control', control, text}
+   * 控件自身没带文字时（`<label for>PC</label><input>` 这种写法），取紧邻的前一个标签。
+   */
+  function groupControls(tokens) {
+    const list = Array.isArray(tokens) ? tokens : [];
+    const wanted = new Set(FIELD_LABELS.map(normLabel));
+    const groups = {};
+    let current = null;
+    let lastLabel = '';
+    list.forEach((t, index) => {
+      if (!t) return;
+      if (t.kind === 'label') {
+        const norm = normLabel(t.text);
+        lastLabel = str(t.text).trim();
+        if (wanted.has(norm)) {
+          current = norm;
+          if (!groups[current]) groups[current] = [];
+        }
+        return;
+      }
+      if (t.kind !== 'control' || !current) return; // 字段标签之前的游离控件不归任何组
+      groups[current].push({
+        index,
+        control: t.control,
+        text: str(t.text).trim() || lastLabel,
+        el: t.el,
+      });
+    });
+    const missing = FIELD_LABELS.filter((l) => !groups[normLabel(l)]);
+    return { groups, missing };
+  }
+
+  /**
+   * 当前停在建条目流程的哪一步。两步共用同一个 URL
+   * （都是 https://www.douban.com/game/create），只能靠页面内容判断。
+   */
+  function detectStep(groups) {
+    const g = groups || {};
+    if (g[FIELD.genres] || g[FIELD.platforms]) return 'detail';
+    if (g[FIELD.titleOriginal]) return 'basic';
+    return 'unknown';
+  }
+
   // ── node 测试导出（在 DOM 启动代码之前 return） ──────────────────────────
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -439,6 +497,7 @@
       normalizeLatin, normalizeCjk, latinSegment, stripOuterBrackets, isTitleMatch, isSearchResultsPage,
       mapGenres, mapPlatforms, coverCandidates, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
+      normLabel, groupControls, detectStep,
       GENRE_MAP, PLATFORM_MAP, DOUBAN_GENRES, FIELD,
     };
     return;
@@ -543,7 +602,8 @@
 
   function stashAndOpen(payload) {
     GM_setValue(STORAGE_KEY, JSON.stringify(payload));
-    GM_openInTab(`${CREATE_BASE}?thing_name=${encodeURIComponent(payload.title)}`, {
+    // 送原文名：第一步问的是「游戏名称（原文）」，中文名在第二步另有一格。
+    GM_openInTab(`${CREATE_BASE}?thing_name=${encodeURIComponent(payload.titleEn)}`, {
       active: true,
       insert: true,
     });
@@ -709,7 +769,273 @@
   // 分派
   // ============================================================
 
+  // ============================================================
+  // 豆瓣侧回填器（与来源无关）
+  // ============================================================
+
+  const BANNER_ID = 'dag-banner';
+
+  function fireValue(el, value) {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function setSelect(sel, value) {
+    const want = String(value);
+    if (![...sel.options].some((o) => o.value === want)) return false;
+    sel.value = want;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
+  function controlKind(el) {
+    const tag = el.tagName;
+    if (tag === 'SELECT') return 'select';
+    if (tag === 'TEXTAREA') return 'textarea';
+    const type = (el.type || 'text').toLowerCase();
+    if (type === 'checkbox' || type === 'radio' || type === 'file') return type;
+    if (type === 'hidden' || type === 'submit' || type === 'button') return 'other';
+    return 'text';
+  }
+
+  /** 元素自己的直接文本（不含后代），用来把「标签」与「容器」区分开。 */
+  function ownText(el) {
+    let out = '';
+    for (const node of el.childNodes) {
+      if (node.nodeType === 3) out += node.nodeValue;
+    }
+    return out.trim();
+  }
+
+  /** DOM → token 流，交给纯函数 groupControls 归组。 */
+  function formTokens(root) {
+    const out = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let el = walker.nextNode(); el; el = walker.nextNode()) {
+      if (/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+        const label = el.closest('label');
+        out.push({ kind: 'control', control: controlKind(el), text: label ? ownText(label) : '', el });
+        continue;
+      }
+      const own = ownText(el);
+      if (own) out.push({ kind: 'label', text: own });
+    }
+    return out;
+  }
+
+  /** 页面上不止一个 form（页头搜索框也是）——挑归出字段最多的那个。 */
+  function pickForm() {
+    const roots = [...document.querySelectorAll('form'), document.body];
+    let best = null;
+    for (const root of roots) {
+      const scan = groupControls(formTokens(root));
+      const n = Object.keys(scan.groups).length;
+      if (!best || n > best.n) best = { root, scan, n };
+    }
+    return best;
+  }
+
+  const firstOf = (list, kind) => (list || []).find((c) => c.control === kind);
+
+  /** 按名字勾选复选框组；返回真正勾上的名字，便于如实汇报。 */
+  function checkByName(list, names) {
+    const done = [];
+    for (const name of names) {
+      const hit = (list || []).find((c) => c.control === 'checkbox' && normLabel(c.text) === normLabel(name));
+      if (!hit || !hit.el) continue;
+      if (!hit.el.checked) {
+        hit.el.checked = true;
+        hit.el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      done.push(name);
+    }
+    return done;
+  }
+
+  /** 「日」下拉常由页面脚本在「月」change 后异步填充，轮询到目标 option 出现为止。 */
+  function pollSelect(sel, value, attempts) {
+    if (value == null) return;
+    const tick = (n) => {
+      if (setSelect(sel, value)) return;
+      if (n > 0) setTimeout(() => tick(n - 1), 60);
+    };
+    tick(attempts);
+  }
+
+  /** 执行回填，返回真正落地的字段——没落地的绝不算进「已填」。 */
+  function applyPlan(groups, plan) {
+    const filled = [];
+    const failed = [];
+    const mark = (label, ok) => (ok ? filled : failed).push(label);
+
+    for (const t of plan.texts) {
+      const el = (firstOf(groups[normLabel(t.label)], 'text') || {}).el;
+      if (el) fireValue(el, t.value);
+      mark(t.label, Boolean(el));
+    }
+    for (const a of plan.textareas) {
+      const el = (firstOf(groups[normLabel(a.label)], 'textarea') || {}).el;
+      if (el) fireValue(el, a.value);
+      mark(a.label, Boolean(el));
+    }
+    for (const [label, names] of [[FIELD.genres, plan.genres], [FIELD.platforms, plan.platforms]]) {
+      if (!names.length) continue;
+      const done = checkByName(groups[normLabel(label)], names);
+      mark(`${label} ${done.join('/')}`.trim(), done.length === names.length);
+    }
+    if (plan.date.y) {
+      const sels = (groups[normLabel(plan.date.field)] || []).filter((c) => c.control === 'select');
+      if (sels.length >= 1) {
+        setSelect(sels[0].el, plan.date.y);
+        if (sels.length >= 2 && plan.date.m) {
+          setSelect(sels[1].el, plan.date.m);
+          if (sels.length >= 3) pollSelect(sels[2].el, plan.date.d, 20);
+        }
+      }
+      mark(plan.date.field, sels.length >= 1);
+    }
+    return { filled, failed };
+  }
+
+  function injectBanner(root, innerHtml) {
+    const old = document.getElementById(BANNER_ID);
+    if (old) old.remove();
+    const bar = document.createElement('div');
+    bar.id = BANNER_ID;
+    // 豆瓣侧沿用与 douban-add-book 同一张米色卡片；换成深色的只是 Steam 那半边。
+    bar.style.cssText =
+      'margin:0 0 14px;padding:12px 14px;border:1px solid #d6c79b;border-radius:8px;' +
+      'background:#fcf9ef;font-size:13px;line-height:1.7;color:#333';
+    bar.innerHTML = innerHtml;
+    root.parentElement.insertBefore(bar, root);
+    return bar;
+  }
+
+  function chips(items, color) {
+    return items
+      .map((t) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:1px 7px;border-radius:10px;background:${color};font-size:12px">${escapeHtml(t)}</span>`)
+      .join('');
+  }
+
+  function highlightSubmit(root) {
+    const btn = root.querySelector('input[type="submit"], button[type="submit"]');
+    if (btn) btn.style.boxShadow = HIGHLIGHT_SHADOW;
+  }
+
+  /** 逐个试封面候选，第一个拿到真图片就用它。 */
+  async function fetchCover(candidates) {
+    for (const url of candidates || []) {
+      try {
+        const resp = await deps.request(url, { anonymous: true, responseType: 'blob' });
+        const blob = resp.response;
+        if (blob && blob.size && /^image\//.test(blob.type || '')) return { blob, url };
+      } catch { /* 试下一个 */ }
+    }
+    return null;
+  }
+
+  async function injectCover(fileEl, payload) {
+    const got = await fetchCover(payload.coverCandidates);
+    if (!got) return null;
+    const ext = (got.blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+    const file = new File([got.blob], `cover.${ext}`, { type: got.blob.type });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileEl.files = dt.files;
+    fileEl.dispatchEvent(new Event('change', { bubbles: true }));
+    return URL.createObjectURL(got.blob);
+  }
+
+  function loadPayload() {
+    const raw = GM_getValue(STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      const p = JSON.parse(raw);
+      if (isPayloadFresh(p, Date.now(), TTL_MS)) return p;
+    } catch { /* 损坏即忽略 */ }
+    GM_deleteValue(STORAGE_KEY);
+    return null;
+  }
+
+  async function fillDetail(root, groups, payload) {
+    // 安全闸门：表单已有的名字与 payload 对不上就只出横幅、不动表单、不消费 payload。
+    // 这道闸门比添书那边的 ISBN 校验弱（thing_name 是我们自己送过去的），
+    // 但仍挡得住「TTL 窗口内换了一款游戏、手动打开建条目页」这种真实误伤。
+    const nameEl = (firstOf(groups[normLabel(FIELD.titleOriginal)], 'text') || {}).el;
+    const existing = nameEl ? nameEl.value.trim() : '';
+    if (existing && !isTitleMatch(existing, payload)) {
+      injectBanner(root, `<b style="color:#c0392b">未自动回填</b>：表单里的名称（${escapeHtml(existing)}）与 Steam 抓到的（${escapeHtml(payload.titleEn)}）对不上，疑似不是同一款。请手动核对。`);
+      return;
+    }
+
+    const plan = buildFillPlan(payload);
+    const { filled, failed } = applyPlan(groups, plan);
+
+    const fileEl = (firstOf(groups[normLabel('图标')], 'file') || {}).el;
+    let cover = '';
+    if (fileEl) {
+      const preview = await injectCover(fileEl, payload);
+      cover = preview
+        ? `<div style="margin-top:8px">封面已注入（来自 Steam），核对后一并提交：<br><img src="${escapeHtml(preview)}" alt="封面预览" style="margin-top:4px;max-height:180px;border:1px solid #d6c79b;border-radius:4px"></div>`
+        : '<div style="margin-top:8px;color:#b8500b">⚠ 封面自动获取失败，请手动上传。</div>';
+    }
+
+    const warn = plan.warnings.length
+      ? `<div style="margin-top:8px;color:#b8500b">${plan.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('<br>')}</div>`
+      : '';
+    const manual = plan.manual.length
+      ? `<div style="margin-top:8px;color:#666">建条目页没有这些字段，创建成功后请到条目编辑页补：${plan.manual.map((m) => `${escapeHtml(m.label)} ${escapeHtml(m.value)}`).join(' · ')}</div>`
+      : '';
+    const bad = failed.length
+      ? `<div style="margin-top:4px;color:#c0392b">没找到控件：${chips(failed, '#f6d6d0')}</div>`
+      : '';
+
+    injectBanner(
+      root,
+      '<b>豆瓣一键添游戏 · 已回填</b>　<span style="color:#888">请核对后人工提交</span>' +
+        `<div style="margin-top:8px">已填：${chips(filled, '#dbefda')}</div>` +
+        bad + warn + manual + cover
+    );
+    highlightSubmit(root);
+    GM_deleteValue(STORAGE_KEY); // 消费即删，免得第二步重载时覆盖你的编辑
+  }
+
+  function runDouban() {
+    const payload = loadPayload();
+    if (!payload) return; // 没有有效 payload：你可能在正常手动建条目，什么都不做
+
+    const best = pickForm();
+    if (!best) return;
+    const step = detectStep(best.scan.groups);
+    if (step === 'detail') {
+      fillDetail(best.root, best.scan.groups, payload);
+      return;
+    }
+    if (step === 'basic') {
+      // 第一步是豆瓣自己的查重闸门——名字已由 thing_name 带过来，剩下的由人点。
+      // 绝不代点「以上都不是，继续创建」。
+      injectBanner(
+        best.root,
+        `<b>豆瓣一键添游戏</b>　已带上名称 <code>${escapeHtml(payload.titleEn)}</code>。` +
+          '这一步是豆瓣自己的查重，请确认列出的都不是同一款，再点「以上都不是，继续创建」——下一步脚本会自动回填全部字段。'
+      );
+      return;
+    }
+    // 一个字段标签都没认出来：多半是豆瓣改了文案或版式。宁可自报家门，
+    // 也不要装作「还在第一步」——把认出/没认出的都列出来，照着改一处就行。
+    injectBanner(
+      best.root,
+      '<b style="color:#c0392b">没认出这一步的表单</b>，未做任何回填（数据仍留着，10 分钟内有效）。' +
+        `<div style="margin-top:6px">认出的字段：${chips(Object.keys(best.scan.groups), '#dbefda') || '（无）'}</div>` +
+        `<div style="margin-top:4px">没找到：${chips(best.scan.missing, '#eee')}</div>` +
+        '<div style="margin-top:6px;color:#666">若豆瓣改了字段名，改脚本里的 <code>FIELD</code> 表即可。</div>'
+    );
+  }
+
   if (location.hostname === 'store.steampowered.com') {
     runSteam();
+  } else if (location.hostname === 'www.douban.com') {
+    runDouban();
   }
 })();
