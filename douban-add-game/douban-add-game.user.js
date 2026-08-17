@@ -142,6 +142,21 @@
     return str(input).replace(/[^一-鿿]/g, '');
   }
 
+  const HAS_CJK_RE = /[一-鿿]/;
+
+  /**
+   * 取标题里的「英文段」：按空白切开后丢掉含 CJK 的词块。
+   * 豆瓣把序号写在中文名上（「哈迪斯2 Hades II」），直接整串归一会得到
+   * '2hadesii'，和英文名 'hadesii' 对不上——而续作常常没有中文商店名，
+   * 中文那路也救不回来。整串都含 CJK（如没有空格分隔的「哈迪斯Hades」）时
+   * 退回原串，保持旧行为。
+   */
+  function latinSegment(input) {
+    const s = str(input);
+    const kept = s.split(/\s+/).filter((t) => t && !HAS_CJK_RE.test(t)).join(' ');
+    return kept || s;
+  }
+
   /**
    * 豆瓣条目标题（形如「哈迪斯 Hades」）与 payload 是否同一款游戏。
    * 两路各自归一后精确相等即命中；归一后为空的一路不参与比较，
@@ -149,8 +164,8 @@
    */
   function isTitleMatch(candidateTitle, payload) {
     const p = payload || {};
-    const cl = normalizeLatin(candidateTitle);
-    const pl = normalizeLatin(p.titleEn);
+    const cl = normalizeLatin(latinSegment(candidateTitle));
+    const pl = normalizeLatin(latinSegment(p.titleEn));
     if (cl && pl && cl === pl) return true;
     const cc = normalizeCjk(candidateTitle);
     const pc = normalizeCjk(p.title);
@@ -224,6 +239,17 @@
     const at = payload && payload.source && payload.source.capturedAt;
     if (typeof at !== 'number') return false;
     return now - at < ttl;
+  }
+
+  /**
+   * 这份 HTML 是不是一张真的搜索结果页。
+   * 豆瓣的风控/验证码页同样回 200 且同样没有 .result——若把它当成「零结果」，
+   * 用户会照着建出重复条目。所以要求两个结构标记同时在场；缺任一就宁可报错、
+   * 退到人工搜索，也不谎称「没搜到」。两个标记在真结果页和真零结果页上都实测存在。
+   */
+  function isSearchResultsPage(input) {
+    const html = str(input);
+    return /class="search-result"/.test(html) && /_SEARCH_CONFIG/.test(html);
   }
 
   const RESULT_SPLIT_RE = /<div class="result">/g;
@@ -376,7 +402,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       parseAppId, parseDate, htmlToText, decodeEntities,
-      normalizeLatin, normalizeCjk, isTitleMatch,
+      normalizeLatin, normalizeCjk, latinSegment, isTitleMatch, isSearchResultsPage,
       mapGenres, mapPlatforms, coverCandidates, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
       GENRE_MAP, PLATFORM_MAP, FIELD,
@@ -452,19 +478,29 @@
   async function searchDouban(query) {
     const resp = await deps.request(SEARCH_BASE + encodeURIComponent(query));
     if (resp.status !== 200) throw new Error('douban search status ' + resp.status);
+    if (!isSearchResultsPage(resp.responseText)) throw new Error('douban search not a results page');
     return parseGameSearchResults(resp.responseText);
   }
 
-  /** 英文名、（若不同）中文名各查一次后合并判定。任一次失败即整体 error。 */
+  /**
+   * 先按英文名查；命中就收工，没命中才补一次中文名查询。
+   * 豆瓣搜索有频率限制（连续请求实测会整页 403），所以常见的「已收录」路径
+   * 只花一次请求。任一次失败即整体 error——绝不把风控当成「没搜到」。
+   */
   async function dedup(payload) {
     const queries = [...new Set([payload.titleEn, payload.title].filter(Boolean))];
     let items = [];
+    let result = { kind: 'none', items: [] };
     try {
-      for (const q of queries) items = items.concat(await searchDouban(q));
+      for (const q of queries) {
+        items = items.concat(await searchDouban(q));
+        result = classifyDedup(payload, items);
+        if (result.kind === 'hit') return result;
+      }
     } catch {
       return { kind: 'error' };
     }
-    return classifyDedup(payload, items);
+    return result;
   }
 
   // ============================================================

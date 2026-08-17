@@ -10,7 +10,9 @@ const {
   htmlToText,
   normalizeLatin,
   normalizeCjk,
+  latinSegment,
   isTitleMatch,
+  isSearchResultsPage,
   mapGenres,
   mapPlatforms,
   coverCandidates,
@@ -145,6 +147,24 @@ test('isTitleMatch: 中英任一路精确相等即命中', () => {
   assert.equal(isTitleMatch('黑神话：悟空', wukong), true); // 中文路命中
   assert.equal(isTitleMatch('哈迪斯2 Hades II', hades), false);
   assert.equal(isTitleMatch("冥王星：黑暗星云 Hades' Star: DARK NEBULA", hades), false);
+});
+
+test('isTitleMatch: 数字续作——中文段里的序号不能污染英文段', () => {
+  // 豆瓣把序号写在中文名上（「哈迪斯2 Hades II」）。整串归一得 '2hadesii'，
+  // 与 payload 的 'hadesii' 对不上；而续作往往没有中文商店名，中文那路也救不了。
+  const sequel = { title: 'Hades II', titleEn: 'Hades II' };
+  assert.equal(isTitleMatch('哈迪斯2 Hades II', sequel), true);
+  assert.equal(isTitleMatch('街霸6 Street Fighter 6', { title: 'Street Fighter 6', titleEn: 'Street Fighter 6' }), true);
+  // 不能因此放宽到误伤：一代不该匹配二代，反之亦然
+  assert.equal(isTitleMatch('哈迪斯 Hades', sequel), false);
+  assert.equal(isTitleMatch('哈迪斯2 Hades II', { title: 'Hades', titleEn: 'Hades' }), false);
+});
+
+test('latinSegment: 丢掉含 CJK 的词块；整串都含 CJK 时退回原串', () => {
+  assert.equal(latinSegment('哈迪斯2 Hades II'), 'Hades II');
+  assert.equal(latinSegment('Hades II'), 'Hades II');
+  assert.equal(latinSegment('黑神话：悟空'), '黑神话：悟空'); // 没有可留的词块 → 原样交给 normalizeLatin 归零
+  assert.equal(latinSegment('哈迪斯Hades'), '哈迪斯Hades'); // 无空格分隔时保持旧行为
 });
 
 test('isTitleMatch: 空归一结果不算命中（纯中文条目 vs 纯英文 payload）', () => {
@@ -337,6 +357,31 @@ test('classifyDedup: 有结果但不精确 → maybe，只留前三条', () => {
 test('classifyDedup: 无结果 → none', () => {
   const p = build(HADES_ZH, HADES_EN, 1145360);
   assert.deepEqual(classifyDedup(p, []), { kind: 'none', items: [] });
+});
+
+test('classifyDedup: 续作能命中已有条目，不退成 maybe', () => {
+  const sequel = build({ ...HADES_ZH, name: 'Hades II' }, { ...HADES_EN, name: 'Hades II' }, 1145350);
+  const r = classifyDedup(sequel, parseGameSearchResults(SEARCH_HTML));
+  assert.equal(r.kind, 'hit');
+  assert.equal(r.item.id, 36185144);
+});
+
+// ── isSearchResultsPage ─────────────────────────────────────────────────────
+const EMPTY_HTML = fs.readFileSync(path.join(__dirname, 'fixture-search-empty.html'), 'utf8');
+
+test('isSearchResultsPage: 真结果页与真零结果页都认', () => {
+  assert.equal(isSearchResultsPage(SEARCH_HTML), true);
+  assert.equal(isSearchResultsPage(EMPTY_HTML), true);
+  assert.deepEqual(parseGameSearchResults(EMPTY_HTML), []); // 零结果就是零结果
+});
+
+test('isSearchResultsPage: 200 的验证码/风控页不认，避免假装「没搜到」', () => {
+  // 风控页也回 200 且没有 .result；若当成 none，用户会照着建出重复条目。
+  const captcha = '<html><body><div class="captcha"><img src="/misc/captcha"><form>请输入验证码</form></div></body></html>';
+  assert.equal(isSearchResultsPage(captcha), false);
+  assert.equal(isSearchResultsPage('<html><body>502 Bad Gateway</body></html>'), false);
+  assert.equal(isSearchResultsPage(''), false);
+  assert.equal(isSearchResultsPage(null), false);
 });
 
 // ── buildFillPlan ───────────────────────────────────────────────────────────
