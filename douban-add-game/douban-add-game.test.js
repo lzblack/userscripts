@@ -24,6 +24,8 @@ const {
   buildPayload,
   classifyDedup,
   buildFillPlan,
+  groupControls,
+  detectStep,
 } = require('./douban-add-game.user.js');
 
 // ── Steam appdetails 样本（字段取自实测响应，正文截短） ────────────────────────
@@ -440,6 +442,68 @@ test('buildFillPlan: 未发售仍填「发售时间」，另出一条提醒', ()
   assert.equal(plan.date.y, 2026);
   assert.equal(plan.date.m, null);
   assert.ok(plan.warnings.some((w) => w.includes('预计发售时间')));
+});
+
+// ── 表单归组（不依赖表单是 table / div / dl 哪种结构） ──────────────────────
+const L = (text) => ({ kind: 'label', text });
+const C = (control, text) => ({ kind: 'control', control, text: text || '' });
+
+/** 按登录态第二步实拍复刻的 token 流：标签在左、控件在右，复选框自带文字。 */
+const step2Tokens = () => [
+  L('名称'), L('请填写 游戏名称（原文），如：Diablo III'), C('text'),
+  L('中文名称'), L('请填写 游戏中文名称，如：暗黑破坏神 3'), C('text'),
+  L('平台'), L('必填，该游戏可运行的平台'),
+  C('checkbox', 'PC'), C('checkbox', 'Mac'), C('checkbox', 'Linux'), C('checkbox', 'PS5'),
+  L('类型'), L('必填，该游戏所属的游戏类型'),
+  C('checkbox', '动作'), C('checkbox', '策略'), C('checkbox', '角色扮演'), C('checkbox', '模拟'),
+  L('发售时间'), L('必填，若游戏尚未发售请填写预计发售时间'),
+  C('select'), L('年'), C('select'), L('月'), C('select'), L('日'),
+  L('简介'), L('简介是条目的完整说明'), C('textarea'),
+  L('图标'), L('可选，请不要上传带有水印的图标'), C('file'),
+];
+
+test('groupControls: 控件归到最近的前驱字段标签', () => {
+  const g = groupControls(step2Tokens());
+  assert.deepEqual(g.groups['名称'].map((c) => c.control), ['text']);
+  assert.deepEqual(g.groups['平台'].map((c) => c.text), ['PC', 'Mac', 'Linux', 'PS5']);
+  assert.deepEqual(g.groups['类型'].map((c) => c.text), ['动作', '策略', '角色扮演', '模拟']);
+  assert.deepEqual(g.groups['发售时间'].map((c) => c.control), ['select', 'select', 'select']);
+  assert.deepEqual(g.groups['简介'].map((c) => c.control), ['textarea']);
+  assert.deepEqual(g.groups['图标'].map((c) => c.control), ['file']);
+  assert.deepEqual(g.missing, []);
+});
+
+test('groupControls: 提示语与「年/月/日」不夺走归属', () => {
+  // 只有 FIELD 表里的标签才开新组；说明文字、单位字都只是过路 token。
+  const g = groupControls(step2Tokens());
+  assert.equal(g.groups['发售时间'].length, 3); // 没被「年」截断
+  assert.equal(g.groups['中文名称'].length, 1); // 没被提示语吞掉
+});
+
+test('groupControls: 复选框自身没带文字时，取紧邻的前一个标签', () => {
+  // <label for=x>PC</label><input id=x type=checkbox> 这种写法
+  const g = groupControls([L('平台'), L('PC'), C('checkbox'), L('Mac'), C('checkbox')]);
+  assert.deepEqual(g.groups['平台'].map((c) => c.text), ['PC', 'Mac']);
+});
+
+test('groupControls: 标签的空白与必填标记不影响匹配', () => {
+  const g = groupControls([L(' 名 称 ：'), C('text'), L('简介*'), C('textarea')]);
+  assert.deepEqual(Object.keys(g.groups), ['名称', '简介']);
+});
+
+test('groupControls: 未出现的字段进 missing，字段标签前的控件不误归', () => {
+  const g = groupControls([C('text'), L('名称'), C('text')]);
+  assert.equal(g.groups['名称'].length, 1); // 前面那个游离控件不算
+  assert.ok(g.missing.includes('类型'));
+  assert.ok(g.missing.includes('平台'));
+  assert.deepEqual(groupControls([]).groups, {});
+});
+
+test('detectStep: 有类型/平台才是第二步', () => {
+  assert.equal(detectStep(groupControls(step2Tokens()).groups), 'detail');
+  // 第一步只有一个名字输入框（外加豆瓣自己的查重结果）
+  assert.equal(detectStep(groupControls([L('名称'), C('text')]).groups), 'basic');
+  assert.equal(detectStep({}), 'unknown');
 });
 
 test('buildFillPlan: 空 payload 不抛异常', () => {
