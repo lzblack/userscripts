@@ -883,53 +883,98 @@
 
   /** 「日」下拉常由页面脚本在「月」change 后异步填充，轮询到目标 option 出现为止。 */
   function pollSelect(sel, value, attempts) {
-    if (value == null) return;
-    const tick = (n) => {
-      if (setSelect(sel, value)) return;
-      if (n > 0) setTimeout(() => tick(n - 1), 60);
-    };
-    tick(attempts);
+    if (value == null) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const tick = (n) => {
+        if (setSelect(sel, value)) return resolve(true);
+        if (n <= 0) return resolve(false);
+        setTimeout(() => tick(n - 1), 60);
+      };
+      tick(attempts);
+    });
   }
 
   /** 执行回填，返回真正落地的字段——没落地的绝不算进「已填」。 */
-  function applyPlan(groups, plan) {
-    const filled = [];
-    const failed = [];
-    const mark = (label, ok) => (ok ? filled : failed).push(label);
+  const dateSelects = (groups, plan) =>
+    (groups[normLabel(plan.date.field)] || []).filter((c) => c.control === 'select');
 
+  /** 只负责写。写没写进去不由它说了算——交给 verifyPlan 读回来看。 */
+  async function applyPlan(groups, plan) {
     for (const t of plan.texts) {
       const el = (firstOf(groups[normLabel(t.label)], 'text') || {}).el;
       if (el) fireValue(el, t.value);
-      mark(t.label, Boolean(el));
     }
     for (const a of plan.textareas) {
       const el = (firstOf(groups[normLabel(a.label)], 'textarea') || {}).el;
       if (el) fireValue(el, a.value);
-      mark(a.label, Boolean(el));
     }
-    // 多选组可能只勾上一部分：勾上的进「已填」、没勾上的单独列，不含混成一条。
     for (const [label, names] of [[FIELD.genres, plan.genres], [FIELD.platforms, plan.platforms]]) {
-      if (!names.length) continue;
-      const done = checkByName(groups[normLabel(label)], names);
-      const miss = names.filter((n) => !done.includes(n));
-      if (done.length) filled.push(`${label} ${done.join('/')}`);
-      if (miss.length) failed.push(`${label} 缺 ${miss.join('/')}`);
+      if (names.length) checkByName(groups[normLabel(label)], names);
     }
     if (plan.date.y) {
-      const sels = (groups[normLabel(plan.date.field)] || []).filter((c) => c.control === 'select');
-      // 只填到年、却报「已填 发售时间」，就是别处刚修掉的那种谎报。
-      // 需要几个下拉由 payload 决定：有月就得两个，有日就得三个。
-      const need = 1 + (plan.date.m ? 1 : 0) + (plan.date.d ? 1 : 0);
+      const sels = dateSelects(groups, plan);
       if (sels.length >= 1) {
         setSelect(sels[0].el, plan.date.y);
         if (sels.length >= 2 && plan.date.m) {
           setSelect(sels[1].el, plan.date.m);
-          if (sels.length >= 3) pollSelect(sels[2].el, plan.date.d, 20);
+          // 「日」由页面脚本在「月」change 之后异步填充，等它出现再选。
+          if (sels.length >= 3) await pollSelect(sels[2].el, plan.date.d, 20);
         }
       }
-      mark(plan.date.field, sels.length >= need);
+    }
+  }
+
+  /**
+   * 读回校验：从 DOM 里把值读回来跟计划比。
+   * 「写过」不等于「填上了」——豆瓣的图标上传会重绘整个表单区，把先前写的值冲掉，
+   * 而横幅在表单外面不受影响，于是会出现「横幅说已填、表单却是空的」。
+   * 所以汇报一律以读回结果为准。
+   */
+  function verifyPlan(groups, plan) {
+    const filled = [];
+    const failed = [];
+    const mark = (label, ok) => (ok ? filled : failed).push(label);
+    const valueOf = (label, kind) => {
+      const el = (firstOf(groups[normLabel(label)], kind) || {}).el;
+      return el ? el.value : null;
+    };
+
+    for (const t of plan.texts) mark(t.label, valueOf(t.label, 'text') === t.value);
+    for (const a of plan.textareas) mark(a.label, valueOf(a.label, 'textarea') === a.value);
+
+    // 多选组可能只勾上一部分：勾上的进「已填」、没勾上的单独列，不含混成一条。
+    for (const [label, names] of [[FIELD.genres, plan.genres], [FIELD.platforms, plan.platforms]]) {
+      if (!names.length) continue;
+      const list = groups[normLabel(label)] || [];
+      const on = names.filter((n) =>
+        list.some((c) => c.control === 'checkbox' && normLabel(c.text) === normLabel(n) && c.el && c.el.checked));
+      const off = names.filter((n) => !on.includes(n));
+      if (on.length) filled.push(`${label} ${on.join('/')}`);
+      if (off.length) failed.push(`${label} 缺 ${off.join('/')}`);
+    }
+
+    if (plan.date.y) {
+      const sels = dateSelects(groups, plan);
+      const want = [plan.date.y, plan.date.m, plan.date.d].filter((v) => v != null);
+      const ok = want.every((v, i) => sels[i] && sels[i].el.value === String(v));
+      mark(plan.date.field, ok);
     }
     return { filled, failed };
+  }
+
+  /** 等 DOM 安静下来（连续 quietMs 无变动），最多等 maxMs。 */
+  function waitForQuiet(target, quietMs, maxMs) {
+    return new Promise((resolve) => {
+      let timer = null;
+      const obs = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(done, quietMs);
+      });
+      const done = () => { clearTimeout(timer); clearTimeout(hard); obs.disconnect(); resolve(); };
+      obs.observe(target, { childList: true, subtree: true, attributes: true });
+      timer = setTimeout(done, quietMs);
+      const hard = setTimeout(done, maxMs);
+    });
   }
 
   function injectBanner(root, innerHtml) {
@@ -1004,8 +1049,9 @@
     }
 
     const plan = buildFillPlan(payload);
-    const { filled, failed } = applyPlan(groups, plan);
 
+    // 封面**先**注入。豆瓣收到图标后会把整个表单区重绘一遍，先填字段的话会被冲掉
+    // ——实测就是这样：横幅（在表单外）还留着并谎报「已填」，表单里却空空如也。
     const fileEl = (firstOf(groups[normLabel('图标')], 'file') || {}).el;
     let cover = '';
     if (fileEl) {
@@ -1013,6 +1059,23 @@
       cover = preview
         ? `<div style="margin-top:8px">封面已注入（来自 Steam），核对后一并提交：<br><img src="${escapeHtml(preview)}" alt="封面预览" style="margin-top:4px;max-height:180px;border:1px solid #d6c79b;border-radius:4px"></div>`
         : '<div style="margin-top:8px;color:#b8500b">⚠ 封面自动获取失败，请手动上传。</div>';
+      if (preview) await waitForQuiet(document.body, 500, 10000);
+    }
+
+    // 重绘之后原来那批元素引用可能已经作废，必须重扫一遍再填。
+    // 填完读回校验；若还是没留住（又被重绘了），再来一轮，仍不行就如实报告。
+    let filled = [];
+    let failed = [];
+    let scope = groups;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const rescan = pickForm();
+      scope = rescan ? rescan.scan.groups : groups;
+      await applyPlan(scope, plan);
+      await waitForQuiet(document.body, 300, 3000);
+      const rescan2 = pickForm();
+      scope = rescan2 ? rescan2.scan.groups : scope;
+      ({ filled, failed } = verifyPlan(scope, plan));
+      if (!failed.length) break;
     }
 
     const warn = plan.warnings.length
@@ -1022,12 +1085,14 @@
       ? `<div style="margin-top:8px;color:#666">建条目页没有这些字段，创建成功后请到条目编辑页补：${plan.manual.map((m) => `${escapeHtml(m.label)} ${escapeHtml(m.value)}`).join(' · ')}</div>`
       : '';
     const bad = failed.length
-      ? `<div style="margin-top:4px;color:#c0392b">没找到控件：${chips(failed, '#f6d6d0')}</div>`
+      ? `<div style="margin-top:4px;color:#c0392b">没填上：${chips(failed, '#f6d6d0')}</div>`
       : '';
 
     injectBanner(
       root,
-      '<b>豆瓣一键添游戏 · 已回填</b>　<span style="color:#888">请核对后人工提交</span>' +
+      (failed.length
+        ? '<b style="color:#b8500b">豆瓣一键添游戏 · 部分未填上</b>　<span style="color:#888">下面标红的请手动补</span>'
+        : '<b>豆瓣一键添游戏 · 已回填</b>　<span style="color:#888">请核对后人工提交</span>') +
         `<div style="margin-top:8px">已填：${chips(filled, '#dbefda')}</div>` +
         bad + warn + manual + cover
     );
