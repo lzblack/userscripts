@@ -454,9 +454,6 @@
   const CREATE_BASE = 'https://www.douban.com/game/create';
   const SEARCH_BASE = 'https://www.douban.com/search?cat=3114&q=';
   const HIGHLIGHT_SHADOW = '0 0 0 3px rgba(46,125,50,.6)'; // 绿色「该点这个」描边
-  // Steam 商店页给 a 定的是浅色（深色底设计），落到米色卡片上等于隐形。
-  // 用行内样式压过去——行内优先级恒高于站点的元素选择器，不必赌 !important。
-  const LINK_STYLE = 'color:#1a6c2f;text-decoration:underline';
 
   const deps = {
     // 默认带 cookie：跨域目标是豆瓣，登录态既是 /game/create 的前提，
@@ -557,25 +554,56 @@
   // ============================================================
 
   const BADGE_ID = 'dag-badge';
+  const DETAIL_ID = 'dag-detail';
+  const TOGGLE_ID = 'dag-toggle';
 
-  function fieldSummaryHtml(p) {
+  /**
+   * 配色取自 Steam 商店页自身的面板（深色底），而不是豆瓣侧那张米色卡片——
+   * 米色卡片贴在 #1b2838 的页面上过于突兀。两侧共享的是版式与那颗绿色行动按钮，
+   * 不是底色。
+   */
+  const C = {
+    bg: '#1b2838',
+    border: 'rgba(255,255,255,.12)',
+    text: '#c6d4df',
+    muted: '#8f98a0',
+    link: '#66c0f4',
+    warn: '#e3b341',
+    ok: '#a4d007',
+    bad: '#ff7b72',
+    btn: '#388e3c',
+  };
+  const LINK_STYLE = `color:${C.link};text-decoration:none`;
+  const CELL = 'display:flex;gap:8px;min-width:0';
+  const KEY = `flex:0 0 52px;color:${C.muted}`;
+
+  /** 展开区的字段表：两列六格，比原先九行竖排省一半高度。 */
+  function fieldGridHtml(p) {
     const date = p.releaseDate
       ? [p.releaseDate.y, p.releaseDate.m, p.releaseDate.d].filter(Boolean).join('-')
       : '—';
-    const rows = [
-      ['名称（原文）', p.titleEn],
-      ['中文名称', p.hasChineseName ? p.title : '（缺，需人工补）'],
-      ['开发商', p.developers.join(' / ') || '—'],
-      ['发行商', p.publishers.join(' / ') || '—'],
-      [p.comingSoon ? '预计上市' : '发行日期', date],
+    const cells = [
+      ['名称', p.titleEn],
       ['类型', p.genres.join(' / ') || '（无对应）'],
+      ['中文名', p.hasChineseName ? p.title : '（缺）'],
       ['平台', p.platforms.join(' / ') || '—'],
-      ['官方网站', p.website || '—'],
+      [p.comingSoon ? '预计' : '发行', date],
       ['简介', p.description ? `${p.description.length} 字` : '（缺失）'],
     ];
-    return rows
-      .map(([k, v]) => `<div style="display:flex;gap:8px"><b style="flex:0 0 64px;color:#666">${k}</b><span>${escapeHtml(String(v))}</span></div>`)
-      .join('');
+    return (
+      `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;margin-top:6px">` +
+      cells
+        .map(([k, v]) => `<div style="${CELL}"><b style="${KEY}">${k}</b><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(v))}</span></div>`)
+        .join('') +
+      '</div>'
+    );
+  }
+
+  /** 建条目页收不下的字段：单独一行提示，别混进「已填」的错觉里。 */
+  function manualHtml(plan) {
+    if (!plan.manual.length) return '';
+    const list = plan.manual.map((m) => `${escapeHtml(m.label)} ${escapeHtml(m.value)}`).join(' · ');
+    return `<div style="margin-top:6px;color:${C.muted}">建条目页无此字段，创建后到条目编辑页补：${list}</div>`;
   }
 
   function ensureBadge() {
@@ -584,8 +612,8 @@
     box = document.createElement('div');
     box.id = BADGE_ID;
     box.style.cssText =
-      'margin:12px 0;padding:12px 14px;border:1px solid #d6c79b;border-radius:8px;' +
-      'background:#fcf9ef;font-size:13px;line-height:1.6;color:#333;max-width:640px';
+      `margin:10px 0;padding:8px 12px;border:1px solid ${C.border};border-radius:4px;` +
+      `background:${C.bg};font-size:13px;line-height:1.6;color:${C.text};max-width:640px`;
     // 主锚点：塞进标题条容器内部（实测落在 top≈506px 首屏内，且 x 与正文栏对齐；
     // 插到它后面会落进全宽的 .page_top_area，左边缘顶到 x=0 跟页面栅格错开）。
     // 左侧正文栏是次选——它自己就在 1165px 处，要滚动才看得到。
@@ -603,49 +631,59 @@
   }
 
   function itemLink(it) {
-    const rating = it.rating ? ` ${escapeHtml(it.rating)} 分` : '';
+    const rating = it.rating ? ` <span style="color:${C.muted}">${escapeHtml(it.rating)}</span>` : '';
     return `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener" style="${LINK_STYLE}">${escapeHtml(it.title)}</a>${rating}`;
+  }
+
+  /** 首行：结论 + 证据链接。相近条目属于决策依据，必须常驻，不能藏进「详情」。 */
+  function headHtml(state, payload, result) {
+    const tag = (color, text) => `<b style="color:${color}">${text}</b>`;
+    if (state === 'loading') return `<span style="color:${C.muted}">豆瓣 · 查重中…</span>`;
+    if (state === 'error') {
+      const q = encodeURIComponent(payload ? payload.titleEn : '');
+      return `${tag(C.bad, '豆瓣 · 查重失败')} <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener" style="${LINK_STYLE}">手动搜索 →</a>`;
+    }
+    if (state === 'hit') return `${tag(C.ok, '豆瓣 · 已收录')} ${itemLink(result.item)}`;
+    if (state === 'maybe') {
+      return `${tag(C.warn, '豆瓣 · 名字相近')} ${result.items.map(itemLink).join('　')}`;
+    }
+    return `${tag(C.text, '豆瓣 · 没搜到')}<span style="color:${C.muted}">（搜不到不等于一定没有）</span>`;
   }
 
   function renderBadge(state, payload, result) {
     const box = ensureBadge();
-    let head = '';
-    let action = '';
-
-    if (state === 'loading') {
-      head = '<b>豆瓣查重中…</b>';
-    } else if (state === 'error') {
-      const q = encodeURIComponent(payload ? payload.titleEn : '');
-      head = `<b style="color:#c0392b">查重失败</b>（风控/网络）· <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener" style="${LINK_STYLE}">手动搜索 →</a>`;
-    } else if (state === 'hit') {
-      head = `<b style="color:#2e7d32">✓ 豆瓣已收录</b> · ${itemLink(result.item)}`;
-    } else if (state === 'maybe') {
-      // 游戏没有 ISBN 这种主键，「名字对不上」不等于「豆瓣没有」，故先摆证据再给按钮。
-      head =
-        '<b style="color:#b8860b">豆瓣有名字相近的条目</b>，请先确认不是同一款：<div style="margin-top:4px">' +
-        result.items.map(itemLink).join('　') +
-        '</div>';
-    } else if (state === 'none') {
-      head = '<b>豆瓣没搜到</b>　<span style="color:#888">（搜不到不等于一定没有，仍请扫一眼豆瓣）</span>';
-    }
-
-    if (state === 'maybe' || state === 'none') {
-      const label = state === 'maybe' ? '都不是，去添加' : '+ 添加到豆瓣';
-      action = `<div style="margin-top:10px"><button id="dag-add" style="cursor:pointer;padding:6px 14px;border:0;border-radius:6px;background:#2e7d32;color:#fff;font-size:13px">${label}</button></div>`;
-    }
-
-    const summary = payload
-      ? `<div style="margin-top:10px;border-top:1px dashed #e0d6b0;padding-top:8px">${fieldSummaryHtml(payload)}</div>`
+    const addable = state === 'maybe' || state === 'none';
+    const action = addable
+      ? `<button id="dag-add" style="flex:none;cursor:pointer;padding:4px 12px;border:0;border-radius:3px;background:${C.btn};color:#fff;font-size:13px">${state === 'maybe' ? '都不是，去添加' : '+ 添加到豆瓣'}</button>`
       : '';
+    const toggle = payload
+      ? `<button id="${TOGGLE_ID}" style="flex:none;cursor:pointer;padding:4px 6px;border:0;background:none;color:${C.muted};font-size:12px">详情 ▾</button>`
+      : '';
+
     // 只在真要添加时列告警——已收录的条目不用管抓取缺了什么。
-    const plan = payload && (state === 'maybe' || state === 'none') ? buildFillPlan(payload) : null;
+    const plan = payload && addable ? buildFillPlan(payload) : null;
     const warn = plan && plan.warnings.length
-      ? `<div style="margin-top:8px;color:#b8500b">${plan.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('<br>')}</div>`
+      ? `<div style="margin-top:6px;color:${C.warn}">${plan.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('　')}</div>`
       : '';
-    box.innerHTML = `<div>${head}</div>${warn}${action}${summary}`;
+    const detail = payload
+      ? `<div id="${DETAIL_ID}" style="display:none;border-top:1px solid ${C.border};margin-top:8px;padding-top:6px">${warn}${fieldGridHtml(payload)}${plan ? manualHtml(plan) : ''}</div>`
+      : '';
+
+    box.innerHTML =
+      `<div style="display:flex;align-items:center;gap:10px">` +
+      `<div style="flex:1 1 auto;min-width:0">${headHtml(state, payload, result)}</div>${action}${toggle}</div>${detail}`;
 
     const btn = box.querySelector('#dag-add');
     if (btn) btn.addEventListener('click', () => stashAndOpen(payload));
+    const tog = box.querySelector('#' + TOGGLE_ID);
+    const det = box.querySelector('#' + DETAIL_ID);
+    if (tog && det) {
+      tog.addEventListener('click', () => {
+        const open = det.style.display === 'none';
+        det.style.display = open ? 'block' : 'none';
+        tog.textContent = open ? '详情 ▴' : '详情 ▾';
+      });
+    }
   }
 
   async function runSteam() {
