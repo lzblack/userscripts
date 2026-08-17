@@ -184,16 +184,39 @@
     return PLATFORM_MAP.filter(([key]) => p[key]).map(([, v]) => v);
   }
 
+  const STEAM_ASSETS = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps';
+
   /**
-   * 封面：优先竖版 library capsule（600×900，形状最接近豆瓣条目封面）。
-   * 它不在 appdetails 响应里，是按 appid 拼出来的固定路径（实测 1145360 /
-   * 1091500 / 2358720 均 200）；拼不出时退回 API 给的 header_image（460×215）。
+   * 封面候选，按偏好排序，运行期逐个试到拿得到图为止：
+   * 竖版 library capsule（600×900，形状最接近豆瓣条目封面）→ 1x 版 → header_image。
+   *
+   * 竖版 URL 不在 appdetails 响应里，只能拼，而且**两种基址都得试**（实测 8 个
+   * app）：
+   *   - 按 appid 裸拼 `…/apps/{appid}/`：1091500、2707930 只在这里有竖版；
+   *   - 从 header_image 剥出的基址：新 app 多一段哈希（3807750 的 header 在
+   *     `…/apps/3807750/d0e9…/` 下），1145360、2358720 两种基址都有。
+   * 竖版对未发售/小体量 app 常常压根不存在（3527290、3807750、4380770、3756870
+   * 两种基址皆 404），因此 header 兜底是必需的，不是保险。
    */
-  function coverUrl(appid, headerImage) {
-    if (appid) {
-      return `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appid}/library_600x900_2x.jpg`;
+  function coverCandidates(headerImage, appid) {
+    const header = str(headerImage).trim();
+    const bases = [];
+    const m = header.match(/^(.*)\/[^/]+\.(?:jpg|png|webp|avif)(?:\?.*)?$/i);
+    if (m) bases.push(m[1]);
+    if (appid) bases.push(`${STEAM_ASSETS}/${appid}`);
+
+    const out = [];
+    const push = (u) => { if (u && !out.includes(u)) out.push(u); };
+    for (const name of ['library_600x900_2x.jpg', 'library_600x900.jpg']) {
+      for (const base of bases) push(`${base}/${name}`);
     }
-    return str(headerImage);
+    push(header);
+    return out;
+  }
+
+  /** appdetails 的 type：只处理 'game'，DLC / 原声带（'music'）/ demo 一律不接。 */
+  function isSupportedType(type) {
+    return str(type) === 'game';
   }
 
   /** payload 是否在 TTL 窗口内（now - capturedAt < ttl）。 */
@@ -260,6 +283,10 @@
     if (!releaseDate) warnings.push(comingSoon ? '未定档（上市时间留空）' : '缺发行日期');
 
     const { genres, unmapped } = mapGenres(zh.genres);
+    // about_the_game 是唯一干净的正文。detailed_description 看着更长，实则混了
+    // 版本/DLC/社群推广样板（2358720 开头是「数字豪华版…兵器：铜云棒」，
+    // 2707930 开头是「Join Our Community!」），故排除。about 可能整段只有视频
+    // 没有文字（1091500 实测 3665 字 HTML 转出来 0 字），这时才退 short。
     const description = htmlToText(zh.about_the_game) || htmlToText(zh.short_description);
     if (!description) warnings.push('缺简介');
 
@@ -278,7 +305,7 @@
       platforms: mapPlatforms(zh.platforms),
       website: str(zh.website).trim(),
       description,
-      coverUrl: coverUrl(appid, zh.header_image),
+      coverCandidates: coverCandidates(zh.header_image, appid),
       warnings,
       source: { name: 'steam', url: str(o.url), capturedAt: o.now },
     };
@@ -350,7 +377,7 @@
     module.exports = {
       parseAppId, parseDate, htmlToText, decodeEntities,
       normalizeLatin, normalizeCjk, isTitleMatch,
-      mapGenres, mapPlatforms, coverUrl, isPayloadFresh,
+      mapGenres, mapPlatforms, coverCandidates, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
       GENRE_MAP, PLATFORM_MAP, FIELD,
     };
