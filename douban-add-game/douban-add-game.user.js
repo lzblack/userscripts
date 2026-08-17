@@ -39,27 +39,39 @@
   };
 
   /**
-   * Steam genre id → 豆瓣「类型」{id,name}。
+   * 建条目页（/game/create 第二步）的「类型」全表，共 19 项。
+   * 比 /game/explore 筛选器上的 15 项多出 卡牌 / 大型多人在线 / 光枪射击 / 文字冒险，
+   * 所以 explore 的那套 id 对建条目页不作数——回填一律按标签文本匹配复选框。
+   */
+  const DOUBAN_GENRES = [
+    '动作', '策略', '体育', '冒险', '角色扮演', '竞速', '模拟', '格斗', '射击', '即时战略',
+    '卡牌', '大型多人在线', '益智', '音乐/旋律', '第一人称射击', '光枪射击', '文字冒险',
+    '乱斗/清版', '横版过关',
+  ];
+
+  /**
+   * Steam genre id → 豆瓣「类型」名。
    * 按 **id** 映射而非文案：实测同一 app 的 genre id 跨 l=schinese / l=english 稳定，
    * 只有 description 变（2358720 两种语言均为 1/25/3）。
-   * 豆瓣只有 15 个类型，Steam 的 4 休闲 / 23 独立 / 29 MMO / 37 F2P / 70 抢先体验
-   * 等在豆瓣没有落点——一律进 unmapped 让人工补，不猜。
+   * Steam 的 4 休闲 / 23 独立 / 37 免费开玩 / 70 抢先体验在豆瓣没有落点——
+   * 一律进 unmapped 让人工补，不猜。
    */
   const GENRE_MAP = {
-    1: { id: 1, name: '动作' },
-    2: { id: 2, name: '策略' },
-    3: { id: 5, name: '角色扮演' },
-    9: { id: 6, name: '竞速' },
-    18: { id: 3, name: '体育' },
-    25: { id: 4, name: '冒险' },
-    28: { id: 7, name: '模拟' },
+    1: '动作',
+    2: '策略',
+    3: '角色扮演',
+    9: '竞速',
+    18: '体育',
+    25: '冒险',
+    28: '模拟',
+    29: '大型多人在线',
   };
 
-  /** Steam 只能确知这三个平台；主机平台无从得知，留空由人工补。 */
+  /** Steam 只能确知这三个平台；主机平台无从得知，留空由人工补。名称与建条目页复选框一致。 */
   const PLATFORM_MAP = [
-    ['windows', { id: 94, name: 'PC' }],
-    ['mac', { id: 17, name: 'Mac' }],
-    ['linux', { id: 152, name: 'Linux' }],
+    ['windows', 'PC'],
+    ['mac', 'Mac'],
+    ['linux', 'Linux'],
   ];
 
   /** 豆瓣游戏条目的字段标签（DOM 执行器按这些文本定位控件）。 */
@@ -182,12 +194,11 @@
     return Boolean(cc && pc && cc === pc);
   }
 
-  /** Steam genres → {genres:[{id,name}], unmapped:[description]}，按输入顺序、按豆瓣 id 去重。 */
+  /** Steam genres → {genres:[豆瓣类型名], unmapped:[Steam 原文案]}，按输入顺序去重。 */
   function mapGenres(input) {
     const list = Array.isArray(input) ? input : [];
     const genres = [];
     const unmapped = [];
-    const seen = new Set();
     for (const g of list) {
       if (!g) continue;
       const hit = GENRE_MAP[Number(g.id)];
@@ -196,17 +207,15 @@
         if (label && !unmapped.includes(label)) unmapped.push(label);
         continue;
       }
-      if (seen.has(hit.id)) continue;
-      seen.add(hit.id);
-      genres.push(hit);
+      if (!genres.includes(hit)) genres.push(hit);
     }
     return { genres, unmapped };
   }
 
-  /** Steam platforms 布尔组 → 豆瓣平台 [{id,name}]。 */
+  /** Steam platforms 布尔组 → 豆瓣平台名。 */
   function mapPlatforms(input) {
     const p = input || {};
-    return PLATFORM_MAP.filter(([key]) => p[key]).map(([, v]) => v);
+    return PLATFORM_MAP.filter(([key]) => p[key]).map(([, name]) => name);
   }
 
   const STEAM_ASSETS = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps';
@@ -386,15 +395,15 @@
     push(texts, FIELD.website, p.website);
     push(textareas, FIELD.description, p.description);
 
-    const genreIds = (p.genres || []).map((g) => g.id);
-    if (genreIds.length) filled.push(FIELD.genres);
+    const genres = [...(p.genres || [])];
+    if (genres.length) filled.push(FIELD.genres);
     else skipped.push(FIELD.genres);
     for (const label of p.unmappedGenres || []) {
       warnings.push(`类型「${label}」豆瓣无对应，请人工补选`);
     }
 
-    const platformIds = (p.platforms || []).map((x) => x.id);
-    if (platformIds.length) filled.push(FIELD.platforms);
+    const platforms = [...(p.platforms || [])];
+    if (platforms.length) filled.push(FIELD.platforms);
     else skipped.push(FIELD.platforms);
 
     const d = p.releaseDate || {};
@@ -405,7 +414,7 @@
 
     if (!payload) warnings.push('无有效 payload');
 
-    return { texts, textareas, genreIds, platformIds, date, warnings, filled, skipped };
+    return { texts, textareas, genres, platforms, date, warnings, filled, skipped };
   }
 
   // ── node 测试导出（在 DOM 启动代码之前 return） ──────────────────────────
@@ -415,7 +424,7 @@
       normalizeLatin, normalizeCjk, latinSegment, stripOuterBrackets, isTitleMatch, isSearchResultsPage,
       mapGenres, mapPlatforms, coverCandidates, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
-      GENRE_MAP, PLATFORM_MAP, FIELD,
+      GENRE_MAP, PLATFORM_MAP, DOUBAN_GENRES, FIELD,
     };
     return;
   }
@@ -430,6 +439,9 @@
   const CREATE_BASE = 'https://www.douban.com/game/create';
   const SEARCH_BASE = 'https://www.douban.com/search?cat=3114&q=';
   const HIGHLIGHT_SHADOW = '0 0 0 3px rgba(46,125,50,.6)'; // 绿色「该点这个」描边
+  // Steam 商店页给 a 定的是浅色（深色底设计），落到米色卡片上等于隐形。
+  // 用行内样式压过去——行内优先级恒高于站点的元素选择器，不必赌 !important。
+  const LINK_STYLE = 'color:#1a6c2f;text-decoration:underline';
 
   const deps = {
     // 默认带 cookie：跨域目标是豆瓣，登录态既是 /game/create 的前提，
@@ -541,8 +553,8 @@
       ['开发商', p.developers.join(' / ') || '—'],
       ['发行商', p.publishers.join(' / ') || '—'],
       [p.comingSoon ? '预计上市' : '发行日期', date],
-      ['类型', p.genres.map((g) => g.name).join(' / ') || '（无对应）'],
-      ['平台', p.platforms.map((x) => x.name).join(' / ') || '—'],
+      ['类型', p.genres.join(' / ') || '（无对应）'],
+      ['平台', p.platforms.join(' / ') || '—'],
       ['官方网站', p.website || '—'],
       ['简介', p.description ? `${p.description.length} 字` : '（缺失）'],
     ];
@@ -577,7 +589,7 @@
 
   function itemLink(it) {
     const rating = it.rating ? ` ${escapeHtml(it.rating)} 分` : '';
-    return `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.title)}</a>${rating}`;
+    return `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener" style="${LINK_STYLE}">${escapeHtml(it.title)}</a>${rating}`;
   }
 
   function renderBadge(state, payload, result) {
@@ -589,7 +601,7 @@
       head = '<b>豆瓣查重中…</b>';
     } else if (state === 'error') {
       const q = encodeURIComponent(payload ? payload.titleEn : '');
-      head = `<b style="color:#c0392b">查重失败</b>（风控/网络）· <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener">手动搜索 →</a>`;
+      head = `<b style="color:#c0392b">查重失败</b>（风控/网络）· <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener" style="${LINK_STYLE}">手动搜索 →</a>`;
     } else if (state === 'hit') {
       head = `<b style="color:#2e7d32">✓ 豆瓣已收录</b> · ${itemLink(result.item)}`;
     } else if (state === 'maybe') {

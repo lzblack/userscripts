@@ -15,6 +15,8 @@ const {
   isSearchResultsPage,
   mapGenres,
   mapPlatforms,
+  GENRE_MAP,
+  DOUBAN_GENRES,
   coverCandidates,
   isSupportedType,
   isPayloadFresh,
@@ -174,32 +176,32 @@ test('isTitleMatch: 空归一结果不算命中（纯中文条目 vs 纯英文 p
 });
 
 // ── 类型 / 平台映射 ─────────────────────────────────────────────────────────
-test('mapGenres: 按 Steam genre id 映射，无对应的进 unmapped', () => {
+test('mapGenres: 按 Steam genre id 映射到豆瓣类型名，无对应的进 unmapped', () => {
   const r = mapGenres(HADES_ZH.genres);
-  assert.deepEqual(r.genres, [
-    { id: 1, name: '动作' },
-    { id: 5, name: '角色扮演' },
-  ]);
+  assert.deepEqual(r.genres, ['动作', '角色扮演']);
   assert.deepEqual(r.unmapped, ['独立']); // Steam 23 Indie 在豆瓣无对应
 });
 
-test('mapGenres: 覆盖全部七条映射且去重', () => {
-  const ids = [1, 2, 3, 9, 18, 25, 28].map((id) => ({ id: String(id), description: 'x' }));
-  assert.deepEqual(mapGenres(ids).genres.map((g) => g.id), [1, 2, 5, 6, 3, 4, 7]);
+test('mapGenres: 覆盖全部八条映射且去重', () => {
+  const ids = [1, 2, 3, 9, 18, 25, 28, 29].map((id) => ({ id: String(id), description: 'x' }));
+  assert.deepEqual(mapGenres(ids).genres, [
+    '动作', '策略', '角色扮演', '竞速', '体育', '冒险', '模拟', '大型多人在线',
+  ]);
   const dup = mapGenres([{ id: '1', description: 'a' }, { id: '1', description: 'a' }]);
   assert.equal(dup.genres.length, 1);
   assert.deepEqual(mapGenres(null), { genres: [], unmapped: [] });
 });
 
+test('mapGenres: 映射目标必须都在建条目页的类型全表里', () => {
+  // 建条目页有 19 个类型，比 /game/explore 筛选器的 15 个多；映射写错字就填不进去。
+  for (const name of Object.values(GENRE_MAP)) {
+    assert.ok(DOUBAN_GENRES.includes(name), `${name} 不在豆瓣类型表里`);
+  }
+});
+
 test('mapPlatforms: 只映射 Steam 能确知的三个', () => {
-  assert.deepEqual(mapPlatforms({ windows: true, mac: true, linux: false }), [
-    { id: 94, name: 'PC' },
-    { id: 17, name: 'Mac' },
-  ]);
-  assert.deepEqual(mapPlatforms({ windows: true, mac: false, linux: true }), [
-    { id: 94, name: 'PC' },
-    { id: 152, name: 'Linux' },
-  ]);
+  assert.deepEqual(mapPlatforms({ windows: true, mac: true, linux: false }), ['PC', 'Mac']);
+  assert.deepEqual(mapPlatforms({ windows: true, mac: false, linux: true }), ['PC', 'Linux']);
   assert.deepEqual(mapPlatforms(null), []);
 });
 
@@ -267,9 +269,9 @@ test('buildPayload: 无中文名时中英同名，别名为空', () => {
   assert.deepEqual(p.developers, ['Supergiant Games']);
   assert.deepEqual(p.releaseDate, { y: 2020, m: 9, d: 17 }); // 取自英文响应
   assert.equal(p.comingSoon, false);
-  assert.deepEqual(p.genres.map((g) => g.id), [1, 5]);
+  assert.deepEqual(p.genres, ['动作', '角色扮演']);
   assert.deepEqual(p.unmappedGenres, ['独立']);
-  assert.deepEqual(p.platforms.map((x) => x.id), [94, 17]);
+  assert.deepEqual(p.platforms, ['PC', 'Mac']);
   assert.equal(p.website, 'http://www.supergiantgames.com');
   assert.ok(p.description.startsWith('Hades 是一款高自由度砍杀型地下城游戏。'));
   assert.equal(p.coverCandidates.length, 3);
@@ -403,8 +405,8 @@ test('buildFillPlan: 有中文名的完整 payload —— 全字段就位、无�
   assert.equal(byLabel['发行商'], 'Game Science');
   assert.equal(byLabel['官方网站'], 'https://www.heishenhua.com');
   assert.deepEqual(plan.date, { field: '发行日期', y: 2024, m: 8, d: 19 });
-  assert.deepEqual(plan.genreIds, [1, 4, 5]);
-  assert.deepEqual(plan.platformIds, [94]);
+  assert.deepEqual(plan.genres, ['动作', '冒险', '角色扮演']);
+  assert.deepEqual(plan.platforms, ['PC']);
   assert.ok(plan.textareas.some((a) => a.label === '游戏简介' && a.value.includes('天命人')));
   assert.deepEqual(plan.warnings, []);
 });
@@ -430,6 +432,6 @@ test('buildFillPlan: 未发售落「预计上市时间」而非「发行日期�
 test('buildFillPlan: 空 payload 不抛异常', () => {
   const plan = buildFillPlan(null);
   assert.deepEqual(plan.texts, []);
-  assert.deepEqual(plan.genreIds, []);
+  assert.deepEqual(plan.genres, []);
   assert.ok(plan.warnings.length > 0);
 });
