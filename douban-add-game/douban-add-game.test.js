@@ -259,12 +259,11 @@ test('isPayloadFresh: TTL 窗口内为真', () => {
 });
 
 // ── buildPayload ────────────────────────────────────────────────────────────
-test('buildPayload: 无中文名时中英同名，别名为空', () => {
+test('buildPayload: 无中文名时中英同名', () => {
   const p = build(HADES_ZH, HADES_EN, 1145360);
   assert.equal(p.appid, 1145360);
   assert.equal(p.title, 'Hades');
   assert.equal(p.titleEn, 'Hades');
-  assert.deepEqual(p.aliases, []);
   assert.equal(p.hasChineseName, false);
   assert.deepEqual(p.developers, ['Supergiant Games']);
   assert.deepEqual(p.releaseDate, { y: 2020, m: 9, d: 17 }); // 取自英文响应
@@ -280,11 +279,10 @@ test('buildPayload: 无中文名时中英同名，别名为空', () => {
   assert.equal(p.source.capturedAt, AT);
 });
 
-test('buildPayload: 有中文名时正标题用中文、英文名进别名', () => {
+test('buildPayload: 有中文名时中英名分列', () => {
   const p = build(WUKONG_ZH, WUKONG_EN, 2358720);
   assert.equal(p.title, '黑神话：悟空');
   assert.equal(p.titleEn, 'Black Myth: Wukong');
-  assert.deepEqual(p.aliases, ['Black Myth: Wukong']);
   assert.equal(p.hasChineseName, true);
   assert.deepEqual(p.releaseDate, { y: 2024, m: 8, d: 19 });
 });
@@ -396,37 +394,42 @@ test('isSearchResultsPage: 200 的验证码/风控页不认，避免假装「没
 });
 
 // ── buildFillPlan ───────────────────────────────────────────────────────────
-test('buildFillPlan: 有中文名的完整 payload —— 全字段就位、无告警', () => {
+// 标签取自登录态第二步「详细资料」实拍：名称（原文）与中文名称分列两个字段，
+// 没有「别名」，日期只有一个「发售时间」。
+test('buildFillPlan: 有中文名的完整 payload —— 原文名与中文名分列、无告警', () => {
   const plan = buildFillPlan(build(WUKONG_ZH, WUKONG_EN, 2358720));
   const byLabel = Object.fromEntries(plan.texts.map((t) => [t.label, t.value]));
-  assert.equal(byLabel['游戏名称'], '黑神话：悟空');
-  assert.equal(byLabel['别名'], 'Black Myth: Wukong');
+  assert.equal(byLabel['名称'], 'Black Myth: Wukong'); // 原文名
+  assert.equal(byLabel['中文名称'], '黑神话：悟空');
   assert.equal(byLabel['开发商'], 'Game Science');
   assert.equal(byLabel['发行商'], 'Game Science');
   assert.equal(byLabel['官方网站'], 'https://www.heishenhua.com');
-  assert.deepEqual(plan.date, { field: '发行日期', y: 2024, m: 8, d: 19 });
+  assert.deepEqual(plan.date, { field: '发售时间', y: 2024, m: 8, d: 19 });
   assert.deepEqual(plan.genres, ['动作', '冒险', '角色扮演']);
   assert.deepEqual(plan.platforms, ['PC']);
-  assert.ok(plan.textareas.some((a) => a.label === '游戏简介' && a.value.includes('天命人')));
+  assert.ok(plan.textareas.some((a) => a.label === '简介' && a.value.includes('天命人')));
   assert.deepEqual(plan.warnings, []);
 });
 
-test('buildFillPlan: 无中文名 → 不臆造翻译，出告警', () => {
+test('buildFillPlan: 无中文名 → 中文名称留空，不拿英文名去凑', () => {
   const plan = buildFillPlan(build(HADES_ZH, HADES_EN, 1145360));
   const byLabel = Object.fromEntries(plan.texts.map((t) => [t.label, t.value]));
-  assert.equal(byLabel['游戏名称'], 'Hades');
+  assert.equal(byLabel['名称'], 'Hades');
+  assert.equal(byLabel['中文名称'], undefined); // 压根不进回填列表
+  assert.ok(plan.skipped.includes('中文名称'));
   assert.ok(plan.warnings.some((w) => w.includes('中文名')));
   assert.ok(plan.warnings.some((w) => w.includes('独立'))); // 未映射类型要人工补
-  assert.ok(plan.skipped.includes('别名'));
 });
 
-test('buildFillPlan: 未发售落「预计上市时间」而非「发行日期」', () => {
+test('buildFillPlan: 未发售仍填「发售时间」，另出一条提醒', () => {
+  // 建条目页只有一个日期字段，提示语写明未发售就填预计时间。
   const zh = { ...WUKONG_ZH, release_date: { coming_soon: true, date: '即将推出' } };
   const en = { ...WUKONG_EN, release_date: { coming_soon: true, date: 'Q4 2026' } };
   const plan = buildFillPlan(build(zh, en, 2358720));
-  assert.equal(plan.date.field, '预计上市时间');
+  assert.equal(plan.date.field, '发售时间');
   assert.equal(plan.date.y, 2026);
   assert.equal(plan.date.m, null);
+  assert.ok(plan.warnings.some((w) => w.includes('预计发售时间')));
 });
 
 test('buildFillPlan: 空 payload 不抛异常', () => {
