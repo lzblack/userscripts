@@ -401,14 +401,24 @@ test('buildFillPlan: 有中文名的完整 payload —— 原文名与中文名�
   const byLabel = Object.fromEntries(plan.texts.map((t) => [t.label, t.value]));
   assert.equal(byLabel['名称'], 'Black Myth: Wukong'); // 原文名
   assert.equal(byLabel['中文名称'], '黑神话：悟空');
-  assert.equal(byLabel['开发商'], 'Game Science');
-  assert.equal(byLabel['发行商'], 'Game Science');
-  assert.equal(byLabel['官方网站'], 'https://www.heishenhua.com');
+  // 建条目页两步都没有开发商/发行商/官网的输入框——不进回填，改成「创建后手动补」清单
+  assert.equal(byLabel['开发商'], undefined);
+  assert.deepEqual(plan.manual, [
+    { label: '开发商', value: 'Game Science' },
+    { label: '发行商', value: 'Game Science' },
+    { label: '官方网站', value: 'https://www.heishenhua.com' },
+  ]);
   assert.deepEqual(plan.date, { field: '发售时间', y: 2024, m: 8, d: 19 });
   assert.deepEqual(plan.genres, ['动作', '冒险', '角色扮演']);
   assert.deepEqual(plan.platforms, ['PC']);
   assert.ok(plan.textareas.some((a) => a.label === '简介' && a.value.includes('天命人')));
-  assert.deepEqual(plan.warnings, []);
+  assert.deepEqual(plan.warnings, []); // manual 不算告警，它是正常流程的一部分
+});
+
+test('buildFillPlan: 没有可手动补的信息时 manual 为空', () => {
+  const bare = { ...WUKONG_ZH, developers: [], publishers: [], website: '' };
+  assert.deepEqual(buildFillPlan(build(bare, WUKONG_EN, 2358720)).manual, []);
+  assert.deepEqual(buildFillPlan(null).manual, []);
 });
 
 test('buildFillPlan: 无中文名 → 中文名称留空，不拿英文名去凑', () => {

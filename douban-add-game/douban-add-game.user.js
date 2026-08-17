@@ -75,24 +75,30 @@
   ];
 
   /**
-   * 豆瓣建条目页的字段标签（DOM 执行器按这些文本定位控件）。
-   * 取自登录态第二步「详细资料」实拍：名称（原文）与中文名称是**两个分开的字段**，
-   * 没有「别名」；日期只有一个「发售时间」（提示语写明未发售就填预计时间，
-   * 因此不像条目展示页那样分「发行日期 / 预计上市时间」两栏）；图标上传也在同一页，
-   * 所以封面不需要跨页交接。开发商 / 发行商 / 官方网站没出现在第二步，
-   * 大概率在第一步「基本资料」——留在计划里，DOM 执行器找不到标签就自然跳过。
+   * 豆瓣建条目页的字段标签（DOM 执行器按这些文本定位控件），取自登录态实拍。
+   * 第一步「基本资料」只收一个名字然后由豆瓣自己查重；第二步「详细资料」就是下面这些。
+   * 要点：名称（原文）与中文名称是**两个分开的字段**，没有「别名」；日期只有一个
+   * 「发售时间」（提示语写明未发售就填预计时间，不像条目展示页分成
+   * 「发行日期 / 预计上市时间」两栏）；图标上传也在这一页，封面无需跨页交接。
    */
   const FIELD = {
     titleOriginal: '名称',
     title: '中文名称',
-    developers: '开发商',
-    publishers: '发行商',
-    website: '官方网站',
     description: '简介',
     date: '发售时间',
     genres: '类型',
     platforms: '平台',
   };
+
+  /**
+   * Steam 有、但建条目页两步都收不下的字段——只能等条目建成后去条目编辑页补。
+   * 不放进回填计划，改为单独列给用户，免得「已填」列表骗人。
+   */
+  const MANUAL_FIELD = [
+    ['developers', '开发商'],
+    ['publishers', '发行商'],
+    ['website', '官方网站'],
+  ];
 
   /** 从 Steam 路径取 appid；年龄门页 /agecheck/app/{id}/ 同样命中，故无需特判。 */
   function parseAppId(pathname) {
@@ -396,10 +402,13 @@
     push(texts, FIELD.titleOriginal, p.titleEn);
     // 没有中文名就把「中文名称」留空——不拿英文名去凑，也不臆造翻译。
     push(texts, FIELD.title, p.hasChineseName ? p.title : '');
-    push(texts, FIELD.developers, (p.developers || []).join(' / '));
-    push(texts, FIELD.publishers, (p.publishers || []).join(' / '));
-    push(texts, FIELD.website, p.website);
     push(textareas, FIELD.description, p.description);
+
+    const manual = [];
+    for (const [key, label] of MANUAL_FIELD) {
+      const v = Array.isArray(p[key]) ? p[key].join(' / ') : str(p[key]);
+      if (v) manual.push({ label, value: v });
+    }
 
     const genres = [...(p.genres || [])];
     if (genres.length) filled.push(FIELD.genres);
@@ -420,7 +429,7 @@
 
     if (!payload) warnings.push('无有效 payload');
 
-    return { texts, textareas, genres, platforms, date, warnings, filled, skipped };
+    return { texts, textareas, genres, platforms, date, manual, warnings, filled, skipped };
   }
 
   // ── node 测试导出（在 DOM 启动代码之前 return） ──────────────────────────
