@@ -1,5 +1,8 @@
 <!-- 截取自 https://www.douban.com/search?cat=3114&q=Hades （匿名可取）。
-     保留三种代表形态：精确命中、同系列续作、含 HTML 实体且「评价人数不足」的条目。 -->
+     保留三种代表形态：精确命中、同系列续作、含 HTML 实体且「评价人数不足」的条目，
+     以及搜索页自己的结构标记（.search-result + _SEARCH_CONFIG），后者用于判定
+     「这确实是一张搜索结果页」而非风控/验证码页。 -->
+<div class="search-result">
 <div class="result-list">
 
 
@@ -94,3 +97,15 @@
 
 
       </div>
+  </div>
+
+  <script>
+    var _SEARCH_CONFIG = {
+      keyword: 'Hades',
+      search_type: 'game',
+      cat_id: '3114',
+      loc_id: '',
+      is_specific_category: true,
+      category_str: '游戏'
+    }
+  </script>
