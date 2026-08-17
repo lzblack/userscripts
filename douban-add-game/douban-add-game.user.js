@@ -74,16 +74,22 @@
     ['linux', 'Linux'],
   ];
 
-  /** 豆瓣游戏条目的字段标签（DOM 执行器按这些文本定位控件）。 */
+  /**
+   * 豆瓣建条目页的字段标签（DOM 执行器按这些文本定位控件）。
+   * 取自登录态第二步「详细资料」实拍：名称（原文）与中文名称是**两个分开的字段**，
+   * 没有「别名」；日期只有一个「发售时间」（提示语写明未发售就填预计时间，
+   * 因此不像条目展示页那样分「发行日期 / 预计上市时间」两栏）；图标上传也在同一页，
+   * 所以封面不需要跨页交接。开发商 / 发行商 / 官方网站没出现在第二步，
+   * 大概率在第一步「基本资料」——留在计划里，DOM 执行器找不到标签就自然跳过。
+   */
   const FIELD = {
-    title: '游戏名称',
-    aliases: '别名',
+    titleOriginal: '名称',
+    title: '中文名称',
     developers: '开发商',
     publishers: '发行商',
     website: '官方网站',
-    description: '游戏简介',
-    releaseDate: '发行日期',
-    expectedDate: '预计上市时间',
+    description: '简介',
+    date: '发售时间',
     genres: '类型',
     platforms: '平台',
   };
@@ -340,7 +346,6 @@
       title,
       titleEn,
       hasChineseName,
-      aliases: titleEn && titleEn !== title ? [titleEn] : [],
       developers: Array.isArray(zh.developers) ? zh.developers.filter(Boolean) : [],
       publishers: Array.isArray(zh.publishers) ? zh.publishers.filter(Boolean) : [],
       releaseDate,
@@ -388,8 +393,9 @@
       if (value) { bucket.push({ label, value }); filled.push(label); }
       else skipped.push(label);
     };
-    push(texts, FIELD.title, p.title);
-    push(texts, FIELD.aliases, (p.aliases || []).join(' / '));
+    push(texts, FIELD.titleOriginal, p.titleEn);
+    // 没有中文名就把「中文名称」留空——不拿英文名去凑，也不臆造翻译。
+    push(texts, FIELD.title, p.hasChineseName ? p.title : '');
     push(texts, FIELD.developers, (p.developers || []).join(' / '));
     push(texts, FIELD.publishers, (p.publishers || []).join(' / '));
     push(texts, FIELD.website, p.website);
@@ -407,10 +413,10 @@
     else skipped.push(FIELD.platforms);
 
     const d = p.releaseDate || {};
-    const field = p.comingSoon ? FIELD.expectedDate : FIELD.releaseDate;
-    const date = { field, y: d.y || null, m: d.m || null, d: d.d || null };
-    if (date.y) filled.push(field);
-    else skipped.push(field);
+    const date = { field: FIELD.date, y: d.y || null, m: d.m || null, d: d.d || null };
+    if (date.y) filled.push(FIELD.date);
+    else skipped.push(FIELD.date);
+    if (p.comingSoon && date.y) warnings.push('尚未发售，填的是 Steam 上的预计发售时间');
 
     if (!payload) warnings.push('无有效 payload');
 
@@ -548,8 +554,8 @@
       ? [p.releaseDate.y, p.releaseDate.m, p.releaseDate.d].filter(Boolean).join('-')
       : '—';
     const rows = [
-      ['游戏名称', p.title],
-      ['别名', p.aliases.length ? p.aliases.join(' / ') : '—'],
+      ['名称（原文）', p.titleEn],
+      ['中文名称', p.hasChineseName ? p.title : '（缺，需人工补）'],
       ['开发商', p.developers.join(' / ') || '—'],
       ['发行商', p.publishers.join(' / ') || '—'],
       [p.comingSoon ? '预计上市' : '发行日期', date],
