@@ -448,19 +448,24 @@
    * 以及日期后面的「年/月/日」都只是过路 token，不会截断分组。
    *
    * token: {kind:'label', text} | {kind:'control', control, text}
-   * 控件自身没带文字时（`<label for>PC</label><input>` 这种写法），取紧邻的前一个标签。
+   *
+   * 控件的名字（复选框旁边的「PC」「动作」）只认 token 自带的 text，**不猜**。
+   * 曾想过「没带文字就退回上一个标签」，但那不可靠：
+   *   [平台][必填，该游戏可运行的平台][□]  ← 上一个标签是提示语
+   *   [平台][PC][□]                        ← 上一个标签是选项名
+   * 两者在 token 层完全同形，猜错就会把提示语当成选项名去匹配。名字改由 DOM 侧
+   * 的 controlText() 从 label 结构里取（包住的 label、`label[for]`、后继兄弟节点
+   * 都覆盖）；真取不到就让它匹配不上，如实报进「没找到控件」。
    */
   function groupControls(tokens) {
     const list = Array.isArray(tokens) ? tokens : [];
     const wanted = new Set(FIELD_LABELS.map(normLabel));
     const groups = {};
     let current = null;
-    let lastLabel = '';
     list.forEach((t, index) => {
       if (!t) return;
       if (t.kind === 'label') {
         const norm = normLabel(t.text);
-        lastLabel = str(t.text).trim();
         if (wanted.has(norm)) {
           current = norm;
           if (!groups[current]) groups[current] = [];
@@ -468,12 +473,7 @@
         return;
       }
       if (t.kind !== 'control' || !current) return; // 字段标签之前的游离控件不归任何组
-      groups[current].push({
-        index,
-        control: t.control,
-        text: str(t.text).trim() || lastLabel,
-        el: t.el,
-      });
+      groups[current].push({ index, control: t.control, text: str(t.text).trim(), el: t.el });
     });
     const missing = FIELD_LABELS.filter((l) => !groups[normLabel(l)]);
     return { groups, missing };
@@ -808,14 +808,37 @@
     return out.trim();
   }
 
+  /**
+   * 复选框旁边那个名字。用整段 textContent 而不是 ownText——名字可能被 <span>
+   * 包着（`<label><input><span>PC</span></label>`），只读直接文本会读成空。
+   * 三种写法都覆盖：label 包住控件、`label[for]` 指过来、控件后面直接跟文字。
+   */
+  function controlText(el) {
+    const wrap = el.closest('label');
+    if (wrap) {
+      const t = wrap.textContent.trim();
+      if (t) return t;
+    }
+    if (el.id) {
+      const forLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (forLabel && forLabel.textContent.trim()) return forLabel.textContent.trim();
+    }
+    for (let node = el.nextSibling; node; node = node.nextSibling) {
+      const t = (node.textContent || '').trim();
+      if (t) return t;
+    }
+    return '';
+  }
+
   /** DOM → token 流，交给纯函数 groupControls 归组。 */
   function formTokens(root) {
     const out = [];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
     for (let el = walker.nextNode(); el; el = walker.nextNode()) {
       if (/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
-        const label = el.closest('label');
-        out.push({ kind: 'control', control: controlKind(el), text: label ? ownText(label) : '', el });
+        const kind = controlKind(el);
+        // 只有多选组才需要「旁边那行字」；文本框/下拉旁边的字是提示语，读进来反成噪声。
+        out.push({ kind: 'control', control: kind, text: kind === 'checkbox' || kind === 'radio' ? controlText(el) : '', el });
         continue;
       }
       const own = ownText(el);
@@ -824,14 +847,19 @@
     return out;
   }
 
-  /** 页面上不止一个 form（页头搜索框也是）——挑归出字段最多的那个。 */
+  /**
+   * 页面上不止一个 form（页头搜索框也是）——挑归出字段最多的那个。
+   * 平手时取**最小**的那个根：嵌套表单和 document.body 会归出同样多的字段，
+   * 但范围越大越容易把别处的控件卷进来。
+   */
   function pickForm() {
     const roots = [...document.querySelectorAll('form'), document.body];
     let best = null;
     for (const root of roots) {
       const scan = groupControls(formTokens(root));
       const n = Object.keys(scan.groups).length;
-      if (!best || n > best.n) best = { root, scan, n };
+      const size = root.querySelectorAll('*').length;
+      if (!best || n > best.n || (n === best.n && size < best.size)) best = { root, scan, n, size };
     }
     return best;
   }
@@ -879,13 +907,19 @@
       if (el) fireValue(el, a.value);
       mark(a.label, Boolean(el));
     }
+    // 多选组可能只勾上一部分：勾上的进「已填」、没勾上的单独列，不含混成一条。
     for (const [label, names] of [[FIELD.genres, plan.genres], [FIELD.platforms, plan.platforms]]) {
       if (!names.length) continue;
       const done = checkByName(groups[normLabel(label)], names);
-      mark(`${label} ${done.join('/')}`.trim(), done.length === names.length);
+      const miss = names.filter((n) => !done.includes(n));
+      if (done.length) filled.push(`${label} ${done.join('/')}`);
+      if (miss.length) failed.push(`${label} 缺 ${miss.join('/')}`);
     }
     if (plan.date.y) {
       const sels = (groups[normLabel(plan.date.field)] || []).filter((c) => c.control === 'select');
+      // 只填到年、却报「已填 发售时间」，就是别处刚修掉的那种谎报。
+      // 需要几个下拉由 payload 决定：有月就得两个，有日就得三个。
+      const need = 1 + (plan.date.m ? 1 : 0) + (plan.date.d ? 1 : 0);
       if (sels.length >= 1) {
         setSelect(sels[0].el, plan.date.y);
         if (sels.length >= 2 && plan.date.m) {
@@ -893,7 +927,7 @@
           if (sels.length >= 3) pollSelect(sels[2].el, plan.date.d, 20);
         }
       }
-      mark(plan.date.field, sels.length >= 1);
+      mark(plan.date.field, sels.length >= need);
     }
     return { filled, failed };
   }
