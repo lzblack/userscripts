@@ -1,0 +1,20 @@
+<!-- 截取自 https://www.douban.com/search?cat=3114&q=Meet%20me%20at%20NooN （匿名可取，2026-09-13）。
+     豆瓣搜索页换成 bywater 前端后的真·零结果页：.search-result 还在，
+     但页内搜索配置从旧的全局变量挪到了 window.BYWATER 命名空间下（见末尾 script）。
+     只认旧标记时，每一张真结果页都会被当成风控页，Steam 角标一律显示「查重失败」、不给添加按钮。 -->
+<div class="search-result">
+
+  <p class="no-result">
+    豆瓣还没有这部游戏。<a href='https://www.douban.com/game/create?thing_name=Meet me at NooN'>&gt;添加游戏</a>
+  </p>
+
+  </div>
+  <div class="back-to-top">
+    <a href="#">&#8593;回顶部</a>
+  </div>
+
+  <script data-bywater-config>
+    window.BYWATER = window.BYWATER || {};
+    window.BYWATER.search = window.BYWATER.search || {};
+    window.BYWATER.search.resultConfig = {"loc_id":"","keyword":"Meet me at NooN","cat_id":"3114","category_str":"游戏","search_type":"game","is_specific_category":true};
+  </script>
