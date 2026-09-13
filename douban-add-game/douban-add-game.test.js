@@ -393,6 +393,26 @@ test('isSearchResultsPage: 换成 bywater 前端后的搜索页也认（配置�
   assert.deepEqual(parseGameSearchResults(BYWATER_HTML), []);
 });
 
+const BYWATER_HITS_HTML = fs.readFileSync(path.join(__dirname, 'fixture-search-bywater-hits.html'), 'utf8');
+
+test('bywater 前端的有结果页：认得出、解析得出、查重判得出', () => {
+  assert.equal(isSearchResultsPage(BYWATER_HITS_HTML), true);
+  const items = parseGameSearchResults(BYWATER_HITS_HTML);
+  assert.equal(items.length, 5);
+  assert.deepEqual(items[0], {
+    id: 30397999,
+    title: '哈迪斯 Hades',
+    url: 'https://www.douban.com/game/30397999/',
+    rating: '9.2',
+    cast: '游戏 / 乱斗/清版 / 角色扮演 / 动作 PC / iPhone / iPad / PS5 / XSX / Nintendo Switch / Steam Deck / PS4 / Xbox One',
+  });
+  assert.equal(items[2].title, "冥王星 Hades' Star");
+  assert.equal(items[2].rating, null);
+  const result = classifyDedup({ titleEn: 'Hades', title: '哈迪斯' }, items);
+  assert.equal(result.kind, 'hit');
+  assert.equal(result.item.id, 30397999);
+});
+
 test('isSearchResultsPage: 光有 .search-result 不够，还得有搜索配置', () => {
   assert.equal(isSearchResultsPage('<div class="search-result"></div>'), false);
 });
