@@ -386,6 +386,17 @@ test('isSearchResultsPage: 真结果页与真零结果页都认', () => {
   assert.deepEqual(parseGameSearchResults(EMPTY_HTML), []); // 零结果就是零结果
 });
 
+const BYWATER_HTML = fs.readFileSync(path.join(__dirname, 'fixture-search-bywater.html'), 'utf8');
+
+test('isSearchResultsPage: 换成 bywater 前端后的搜索页也认（配置挪到了 BYWATER.search.resultConfig）', () => {
+  assert.equal(isSearchResultsPage(BYWATER_HTML), true);
+  assert.deepEqual(parseGameSearchResults(BYWATER_HTML), []);
+});
+
+test('isSearchResultsPage: 光有 .search-result 不够，还得有搜索配置', () => {
+  assert.equal(isSearchResultsPage('<div class="search-result"></div>'), false);
+});
+
 test('isSearchResultsPage: 200 的验证码/风控页不认，避免假装「没搜到」', () => {
   // 风控页也回 200 且没有 .result；若当成 none，用户会照着建出重复条目。
   const captcha = '<html><body><div class="captcha"><img src="/misc/captcha"><form>请输入验证码</form></div></body></html>';

@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.0
+// @version      1.0.1
 // @author       lzblack
 // @description  在 Steam 商店页查豆瓣是否已收录该游戏；未收录则一键跳转「创建游戏条目」、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://store.steampowered.com/app/*
@@ -277,10 +277,16 @@
    * 豆瓣的风控/验证码页同样回 200 且同样没有 .result——若把它当成「零结果」，
    * 用户会照着建出重复条目。所以要求两个结构标记同时在场；缺任一就宁可报错、
    * 退到人工搜索，也不谎称「没搜到」。两个标记在真结果页和真零结果页上都实测存在。
+   *
+   * 页内搜索配置有新旧两种写法，都认：旧版是全局 `var _SEARCH_CONFIG = {…}`；
+   * 2026-09 实测豆瓣换成 bywater 前端后改成 `window.BYWATER.search.resultConfig = {…}`。
+   * 只认旧写法那阵子，每张真结果页都被判成风控页——角标一律「查重失败」、没有添加按钮。
    */
+  const SEARCH_CONFIG_RE = /_SEARCH_CONFIG|BYWATER[.]search[.]resultConfig/;
+
   function isSearchResultsPage(input) {
     const html = str(input);
-    return /class="search-result"/.test(html) && /_SEARCH_CONFIG/.test(html);
+    return /class="search-result"/.test(html) && SEARCH_CONFIG_RE.test(html);
   }
 
   const RESULT_SPLIT_RE = /<div class="result">/g;
