@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.5
+// @version      1.0.6
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -155,6 +155,35 @@
     return str(input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
   }
 
+  /** 把简介内容节点读成带换行的纯文本（只用 nodeType/tagName/nodeValue/childNodes/
+   *  textContent/querySelectorAll，故可在 node 下用替身测试）。
+   *  有「含文字的」<p>/<li> 时按块读（li 加「· 」，见 McCartney Legacy/0063000709）；
+   *  块外文字刻意丢弃——作者卡片靠这一点绕开 Follow 提示和 Read more 页脚。
+   *  否则按断行读：<br> 是换行（span+<br>，见 Math for Web Design/1633434826），
+   *  空 <p> 是段落分隔（span+空<p>，见 Red Ants/1640098089——旧逻辑见到 <p> 就走块模式，
+   *  读到的全是空块，简介判成缺失）。始终用 textContent / nodeValue（DOM 顺序、单份），
+   *  不碰 partial-collapse 的 innerText 重排坑（见 Messy Jobs/B0H4495X34）。 */
+  function descriptionBlockText(content) {
+    const blocks = [...content.querySelectorAll('p, li')].filter((el) => el.textContent.trim());
+    if (blocks.length) {
+      return blocks
+        .map((el) => (el.tagName === 'LI' ? '· ' : '') + el.textContent.replace(/\s+/g, ' ').trim())
+        .join('\n\n');
+    }
+    const flat = (node) => {
+      if (node.nodeType === 3) return node.nodeValue;
+      if (node.nodeType !== 1) return '';
+      if (node.tagName === 'BR') return '\n';
+      if (node.tagName === 'P') return '\n\n'; // 走到这里的 <p> 都是空的
+      return [...node.childNodes].map(flat).join('');
+    };
+    return flat(content)
+      .replace(/[^\S\n]+/g, ' ')
+      .split('\n').map((l) => l.trim()).join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
   /** payload 是否在 TTL 窗口内（now - capturedAt < ttl）。 */
   function isPayloadFresh(payload, now, ttl) {
     const at = payload && payload.source && payload.source.capturedAt;
@@ -220,7 +249,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
-      normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, isPayloadFresh,
+      normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, descriptionBlockText, isPayloadFresh,
       bindingRadioValue, buildFillPlan, isBookCategory,
     };
     return;
@@ -374,28 +403,6 @@
   }
 
   const ABOUT_AUTHOR_RE = /(^|\n)[ \t]*about the author[ \t]*(\n|$)/i;
-
-  /** 把简介内容节点读成带换行的纯文本。
-   *  有 <p>/<li> 时按块读（li 加「· 」，见 McCartney Legacy/0063000709）；否则是
-   *  span+<br> 结构（见 Math for Web Design/1633434826），把 <br> 当换行——否则
-   *  textContent 会把所有段落挤成一行。始终用 textContent（DOM 顺序、单份），
-   *  不碰 partial-collapse 的 innerText 重排坑（见 Messy Jobs/B0H4495X34）。 */
-  function descriptionBlockText(content) {
-    const blocks = [...content.querySelectorAll('p, li')];
-    if (blocks.length) {
-      return blocks
-        .map((el) => (el.tagName === 'LI' ? '· ' : '') + el.textContent.replace(/\s+/g, ' ').trim())
-        .filter((t) => t && t !== '· ')
-        .join('\n\n');
-    }
-    const clone = content.cloneNode(true);
-    clone.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
-    return clone.textContent
-      .replace(/[^\S\n]+/g, ' ')
-      .split('\n').map((l) => l.trim()).join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
 
   /** 内容简介：读全文后，若内嵌「About the author」小节则截断到它之前（作者简介另取）。 */
   function extractDescription() {

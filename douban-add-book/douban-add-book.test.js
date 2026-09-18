@@ -13,6 +13,7 @@ const {
   normalizeTitle,
   parsePageCount,
   cleanDescription,
+  descriptionBlockText,
   isPayloadFresh,
   bindingRadioValue,
   buildFillPlan,
@@ -180,6 +181,81 @@ test('cleanDescription: strips trailing Read more/less toggle', () => {
   assert.equal(cleanDescription('A great book.'), 'A great book.');
   assert.equal(cleanDescription('  spaced  '), 'spaced');
   assert.equal(cleanDescription(''), '');
+});
+
+// ── descriptionBlockText ────────────────────────────────────────────────────
+// 最小 DOM 替身：只实现 descriptionBlockText 用到的 nodeType/tagName/nodeValue/
+// childNodes/textContent/querySelectorAll('p, li')，用来钉住真实页面的结构。
+function txt(s) {
+  return { nodeType: 3, nodeValue: s, get textContent() { return s; } };
+}
+function el(tag, ...kids) {
+  const node = {
+    nodeType: 1,
+    tagName: tag.toUpperCase(),
+    childNodes: kids.map((k) => (typeof k === 'string' ? txt(k) : k)),
+    get textContent() { return this.childNodes.map((c) => c.textContent).join(''); },
+    querySelectorAll(sel) {
+      assert.equal(sel, 'p, li');
+      const out = [];
+      const walk = (n) => n.childNodes.forEach((c) => {
+        if (c.nodeType !== 1) return;
+        if (c.tagName === 'P' || c.tagName === 'LI') out.push(c);
+        walk(c);
+      });
+      walk(this);
+      return out;
+    },
+  };
+  return node;
+}
+
+test('descriptionBlockText: empty <p> as separators between bare spans (Red Ants/1640098089)', () => {
+  const content = el('div',
+    ' ',
+    el('span', 'LONGLISTED FOR THE NATIONAL BOOK AWARD '),
+    el('p'),
+    el('span', 'This bold and genre-defying prose debut'),
+    el('p'),
+    el('span', "Kimberly Blaeser's singular stories. "),
+    el('p'),
+    el('span', 'For readers of '),
+    el('span', 'Night of the Living Rez'),
+    el('span', ' and '),
+    el('span', 'Crooked Hallelujah'),
+    el('span', ', a debut.'),
+    '  ');
+  assert.equal(descriptionBlockText(content), [
+    'LONGLISTED FOR THE NATIONAL BOOK AWARD',
+    'This bold and genre-defying prose debut',
+    "Kimberly Blaeser's singular stories.",
+    'For readers of Night of the Living Rez and Crooked Hallelujah, a debut.',
+  ].join('\n\n'));
+});
+
+test('descriptionBlockText: text-bearing <p>/<li> read as blocks (McCartney Legacy/0063000709)', () => {
+  const content = el('div',
+    el('p', 'Intro   paragraph.'),
+    el('ul', el('li', 'First'), el('li', ' '), el('li', 'Second')),
+    el('p', 'Closing.'));
+  assert.equal(descriptionBlockText(content), 'Intro paragraph.\n\n· First\n\n· Second\n\nClosing.');
+});
+
+test('descriptionBlockText: block mode ignores text outside blocks (author card Follow/Read more)', () => {
+  const content = el('div', el('p', 'Bio paragraph.'), el('span', 'Follow'), el('a', 'Read more'));
+  assert.equal(descriptionBlockText(content), 'Bio paragraph.');
+});
+
+test('descriptionBlockText: span + <br> structure (Math for Web Design/1633434826)', () => {
+  const content = el('div',
+    el('span', 'Para one line.', el('br'), el('br'), 'Para   two.', el('br'), el('br')),
+    el('span', el('b', 'About the author'), el('br'), ' Author bio.'));
+  assert.equal(descriptionBlockText(content), 'Para one line.\n\nPara two.\n\nAbout the author\nAuthor bio.');
+});
+
+test('descriptionBlockText: empty or whitespace-only content → empty string', () => {
+  assert.equal(descriptionBlockText(el('div')), '');
+  assert.equal(descriptionBlockText(el('div', '  ', el('p'), el('p', ' '))), '');
 });
 
 // ── isPayloadFresh ──────────────────────────────────────────────────────────
