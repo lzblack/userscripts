@@ -588,7 +588,9 @@
       data_request: { include_assets: true },
     });
     try {
-      const resp = await deps.request(`${ITEMS_API}?input_json=${encodeURIComponent(input)}`, { anonymous: true });
+      const resp = await deps.request(`${ITEMS_API}?input_json=${encodeURIComponent(input)}`, {
+        anonymous: true, timeout: 5000, // 只为封面；别让它拖住角标
+      });
       return parseItemAssets(JSON.parse(resp.responseText), appid);
     } catch {
       return null;
