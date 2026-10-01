@@ -36,6 +36,7 @@
 
 - `@match` 仅 `store.steampowered.com/app/*` 与 `www.douban.com/game/create*`。
 - `@connect store.steampowered.com`：读 Steam 官方 appdetails 接口。
+- `@connect api.steampowered.com`：读 Steam 官方接口，取现行的竖版封面地址。
 - `@connect www.douban.com`：搜索这款游戏是否已收录。**仅读取公开信息，不做任何写操作。**
 - `@connect shared.akamai.steamstatic.com`：抓取封面图。
 - **不接入任何第三方或分析服务，不上传你的任何数据。**

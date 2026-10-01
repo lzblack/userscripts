@@ -18,6 +18,7 @@ const {
   GENRE_MAP,
   DOUBAN_GENRES,
   coverCandidates,
+  parseItemAssets,
   isSupportedType,
   isPayloadFresh,
   parseGameSearchResults,
@@ -80,8 +81,8 @@ const WUKONG_EN = {
 };
 
 const AT = 1_700_000_000_000;
-const build = (zh, en, appid) =>
-  buildPayload({ zh, en, appid, url: `https://store.steampowered.com/app/${appid}/`, now: AT });
+const build = (zh, en, appid, assets) =>
+  buildPayload({ zh, en, appid, assets, url: `https://store.steampowered.com/app/${appid}/`, now: AT });
 
 // ── parseAppId ──────────────────────────────────────────────────────────────
 test('parseAppId: 取 /app/{id}/ 的数字段', () => {
@@ -210,36 +211,75 @@ test('mapPlatforms: 只映射 Steam 能确知的三个', () => {
 // ── 封面 ────────────────────────────────────────────────────────────────────
 const A = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps';
 
-test('coverCandidates: 两种基址同源时去重，竖版优先、header 兜底', () => {
-  assert.deepEqual(coverCandidates(`${A}/1145360/header.jpg?t=1758127023`, 1145360), [
-    `${A}/1145360/library_600x900_2x.jpg`,
-    `${A}/1145360/library_600x900.jpg`,
-    `${A}/1145360/header.jpg?t=1758127023`,
+// GetItems 实测响应（截取 assets）。asset_url_format 里的 ${FILENAME} 是字面占位符，
+// 故用普通引号字符串，不能写进模板字面量。
+const MINDBREAK_ITEMS = {
+  response: {
+    store_items: [{
+      appid: 3470490, success: 1,
+      assets: {
+        asset_url_format: 'steam/apps/3470490/${FILENAME}?t=1787655679',
+        header: '66dc56656360fcf8372dbceea37698ae874e4b4f/header.jpg',
+        library_capsule: '406767df736ffceee28bbc9a7bb013ae1b5a05dc/library_capsule.jpg',
+        library_capsule_2x: '406767df736ffceee28bbc9a7bb013ae1b5a05dc/library_capsule_2x.jpg',
+      },
+    }],
+  },
+};
+const HADES_ASSETS = {
+  asset_url_format: 'steam/apps/1145360/${FILENAME}?t=1758127023',
+  header: 'header.jpg',
+  library_capsule: 'library_600x900.jpg',
+  library_capsule_2x: 'library_600x900_2x.jpg',
+};
+
+test('parseItemAssets: 取出对应 appid 的 assets', () => {
+  const a = parseItemAssets(MINDBREAK_ITEMS, 3470490);
+  assert.equal(a.library_capsule_2x, '406767df736ffceee28bbc9a7bb013ae1b5a05dc/library_capsule_2x.jpg');
+});
+
+test('parseItemAssets: 失败/不存在/缺格式一律 null', () => {
+  // 999999999 实测返回 success:15、appid:0、无 assets
+  const unknown = { response: { store_items: [{ id: 999999999, success: 15, appid: 0 }] } };
+  assert.equal(parseItemAssets(unknown, 999999999), null);
+  assert.equal(parseItemAssets(MINDBREAK_ITEMS, 1145360), null); // appid 对不上
+  assert.equal(parseItemAssets({ response: {} }, 3470490), null);
+  assert.equal(parseItemAssets(null, 3470490), null);
+  const noFmt = { response: { store_items: [{ appid: 1, success: 1, assets: { header: 'h.jpg' } }] } };
+  assert.equal(parseItemAssets(noFmt, 1), null);
+});
+
+test('coverCandidates: 竖版取自 GetItems 的现行文件名，header 兜底', () => {
+  const header = `${A}/3470490/66dc56656360fcf8372dbceea37698ae874e4b4f/header.jpg?t=1787655679`;
+  const out = coverCandidates(parseItemAssets(MINDBREAK_ITEMS, 3470490), header);
+  assert.deepEqual(out, [
+    `${A}/3470490/406767df736ffceee28bbc9a7bb013ae1b5a05dc/library_capsule_2x.jpg?t=1787655679`,
+    `${A}/3470490/406767df736ffceee28bbc9a7bb013ae1b5a05dc/library_capsule.jpg?t=1787655679`,
+    header,
   ]);
 });
 
-test('coverCandidates: 带哈希段时哈希基址与 appid 裸基址都要试', () => {
-  // 实测 3807750 的 header 在 .../apps/3807750/d0e9…/ 下；而 1091500 反过来，
-  // 竖版只存在于 appid 裸路径上——所以两条都得进候选。
-  const hash = 'd0e999375da882ad74494708486dc3e3db7344cd';
-  const hashed = `${A}/3807750/${hash}/header.jpg?t=1786979515`;
-  assert.deepEqual(coverCandidates(hashed, 3807750), [
-    `${A}/3807750/${hash}/library_600x900_2x.jpg`,
-    `${A}/3807750/library_600x900_2x.jpg`,
-    `${A}/3807750/${hash}/library_600x900.jpg`,
-    `${A}/3807750/library_600x900.jpg`,
-    hashed,
+test('coverCandidates: 回归 3470490——不再去拼 appid 裸路径上的旧竖版', () => {
+  // 改名前（Mindbound）的竖版仍留在 .../apps/3470490/library_600x900*.jpg 上且 200，
+  // 拼路径会注入错图。
+  const out = coverCandidates(parseItemAssets(MINDBREAK_ITEMS, 3470490), '');
+  assert.ok(out.every((u) => !/\/apps\/3470490\/library_600x900/.test(u)), out.join('\n'));
+});
+
+test('coverCandidates: 老式无哈希段的 app 同样按 GetItems 拼', () => {
+  const header = `${A}/1145360/header.jpg?t=1758127023`;
+  assert.deepEqual(coverCandidates(HADES_ASSETS, header), [
+    `${A}/1145360/library_600x900_2x.jpg?t=1758127023`,
+    `${A}/1145360/library_600x900.jpg?t=1758127023`,
+    header,
   ]);
 });
 
-test('coverCandidates: 无 header 时仍可凭 appid 试竖版；两者皆无则空', () => {
-  assert.deepEqual(coverCandidates('', 1145360), [
-    `${A}/1145360/library_600x900_2x.jpg`,
-    `${A}/1145360/library_600x900.jpg`,
-  ]);
-  assert.deepEqual(coverCandidates('', null), []);
-  assert.deepEqual(coverCandidates(null, null), []);
-  assert.deepEqual(coverCandidates('https://x/weird', null), ['https://x/weird']);
+test('coverCandidates: 拿不到 assets 时只剩 header；两者皆无则空', () => {
+  assert.deepEqual(coverCandidates(null, 'https://x/h.jpg'), ['https://x/h.jpg']);
+  assert.deepEqual(coverCandidates({ asset_url_format: 'steam/apps/1/${FILENAME}' }, 'https://x/h.jpg'), ['https://x/h.jpg']);
+  assert.deepEqual(coverCandidates(null, ''), []);
+  assert.deepEqual(coverCandidates(undefined, null), []);
 });
 
 test('isSupportedType: 只接 game，DLC/原声带/demo 一律不接', () => {
@@ -275,10 +315,18 @@ test('buildPayload: 无中文名时中英同名', () => {
   assert.deepEqual(p.platforms, ['PC', 'Mac']);
   assert.equal(p.website, 'http://www.supergiantgames.com');
   assert.ok(p.description.startsWith('Hades 是一款高自由度砍杀型地下城游戏。'));
-  assert.equal(p.coverCandidates.length, 3);
-  assert.ok(p.coverCandidates[0].endsWith('/1145360/library_600x900_2x.jpg'));
+  assert.deepEqual(p.coverCandidates, [HADES_ZH.header_image]); // 无 assets 只剩 header
   assert.equal(p.source.name, 'steam');
   assert.equal(p.source.capturedAt, AT);
+});
+
+test('buildPayload: assets 透传给封面候选，竖版排在 header 前', () => {
+  const p = build(HADES_ZH, HADES_EN, 1145360, HADES_ASSETS);
+  assert.deepEqual(p.coverCandidates, [
+    `${A}/1145360/library_600x900_2x.jpg?t=1758127023`,
+    `${A}/1145360/library_600x900.jpg?t=1758127023`,
+    HADES_ZH.header_image,
+  ]);
 });
 
 test('buildPayload: 有中文名时中英名分列', () => {

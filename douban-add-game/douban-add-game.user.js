@@ -3,12 +3,13 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.1
+// @version      1.0.2
 // @author       lzblack
 // @description  在 Steam 商店页查豆瓣是否已收录该游戏；未收录则一键跳转「创建游戏条目」、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://store.steampowered.com/app/*
 // @match        https://www.douban.com/game/create*
 // @connect      store.steampowered.com
+// @connect      api.steampowered.com
 // @connect      www.douban.com
 // @connect      shared.akamai.steamstatic.com
 // @grant        GM_xmlhttpRequest
@@ -230,33 +231,42 @@
     return PLATFORM_MAP.filter(([key]) => p[key]).map(([, name]) => name);
   }
 
-  const STEAM_ASSETS = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps';
+  const STEAM_ASSET_ROOT = 'https://shared.akamai.steamstatic.com/store_item_assets/';
+  const ITEMS_API = 'https://api.steampowered.com/IStoreBrowseService/GetItems/v1/';
+
+  /**
+   * IStoreBrowseService/GetItems 响应 → 该 app 的 assets（含 asset_url_format 与各图
+   * 的现行文件名）；失败 / 不存在（实测 success:15）/ 缺格式一律 null。
+   */
+  function parseItemAssets(json, appid) {
+    const items = json && json.response && json.response.store_items;
+    if (!Array.isArray(items)) return null;
+    const it = items.find((x) => x && String(x.appid) === String(appid));
+    if (!it || it.success !== 1 || !it.assets) return null;
+    return str(it.assets.asset_url_format).includes('${FILENAME}') ? it.assets : null;
+  }
 
   /**
    * 封面候选，按偏好排序，运行期逐个试到拿得到图为止：
-   * 竖版 library capsule（600×900，形状最接近豆瓣条目封面）→ 1x 版 → header_image。
+   * 竖版 library capsule 2x（600×900，形状最接近豆瓣条目封面）→ 1x → header_image。
    *
-   * 竖版 URL 不在 appdetails 响应里，只能拼，而且**两种基址都得试**（实测 8 个
-   * app）：
-   *   - 按 appid 裸拼 `…/apps/{appid}/`：1091500、2707930 只在这里有竖版；
-   *   - 从 header_image 剥出的基址：新 app 多一段哈希（3807750 的 header 在
-   *     `…/apps/3807750/d0e9…/` 下），1145360、2358720 两种基址都有。
-   * 竖版对未发售/小体量 app 常常压根不存在（3527290、3807750、4380770、3756870
-   * 两种基址皆 404），因此 header 兜底是必需的，不是保险。
+   * 竖版文件名只信 GetItems 给的，**绝不按路径拼**：素材换版后旧文件不会删，
+   * 3470490 改名 Mindbreak 后，appid 裸路径上的 library_600x900*.jpg 仍是改名前
+   * Mindbound 的图且照样 200——拼路径会注入别的游戏的封面。新素材在哈希目录下，
+   * 老 app 仍是裸文件名（1145360），GetItems 两种都直接给出。
+   * GetItems 失败时只剩 header：横版但一定是现行的。
    */
-  function coverCandidates(headerImage, appid) {
-    const header = str(headerImage).trim();
-    const bases = [];
-    const m = header.match(/^(.*)\/[^/]+\.(?:jpg|png|webp|avif)(?:\?.*)?$/i);
-    if (m) bases.push(m[1]);
-    if (appid) bases.push(`${STEAM_ASSETS}/${appid}`);
-
+  function coverCandidates(assets, headerImage) {
     const out = [];
     const push = (u) => { if (u && !out.includes(u)) out.push(u); };
-    for (const name of ['library_600x900_2x.jpg', 'library_600x900.jpg']) {
-      for (const base of bases) push(`${base}/${name}`);
+    const fmt = str(assets && assets.asset_url_format);
+    if (fmt.includes('${FILENAME}')) {
+      for (const key of ['library_capsule_2x', 'library_capsule']) {
+        const name = str(assets[key]).trim();
+        if (name) push(STEAM_ASSET_ROOT + fmt.replace('${FILENAME}', name));
+      }
     }
-    push(header);
+    push(str(headerImage).trim());
     return out;
   }
 
@@ -332,6 +342,7 @@
     const zh = o.zh || {};
     const en = o.en || null;
     const appid = o.appid || null;
+    const assets = o.assets || null;
     const warnings = [];
 
     const title = stripOuterBrackets(str(zh.name).trim());
@@ -367,7 +378,7 @@
       platforms: mapPlatforms(zh.platforms),
       website: str(zh.website).trim(),
       description,
-      coverCandidates: coverCandidates(zh.header_image, appid),
+      coverCandidates: coverCandidates(assets, zh.header_image),
       warnings,
       source: { name: 'steam', url: str(o.url), capturedAt: o.now },
     };
@@ -501,7 +512,7 @@
     module.exports = {
       parseAppId, parseDate, htmlToText, decodeEntities,
       normalizeLatin, normalizeCjk, latinSegment, stripOuterBrackets, isTitleMatch, isSearchResultsPage,
-      mapGenres, mapPlatforms, coverCandidates, isSupportedType, isPayloadFresh,
+      mapGenres, mapPlatforms, coverCandidates, parseItemAssets, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
       normLabel, groupControls, detectStep,
       GENRE_MAP, PLATFORM_MAP, DOUBAN_GENRES, FIELD,
@@ -564,6 +575,21 @@
       const json = JSON.parse(resp.responseText);
       const entry = json && json[String(appid)];
       return entry && entry.success ? entry.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 取 GetItems 的 assets；非致命，任何失败都返回 null（封面退回 header）。 */
+  async function fetchItemAssets(appid) {
+    const input = JSON.stringify({
+      ids: [{ appid: Number(appid) }],
+      context: { country_code: 'US' },
+      data_request: { include_assets: true },
+    });
+    try {
+      const resp = await deps.request(`${ITEMS_API}?input_json=${encodeURIComponent(input)}`, { anonymous: true });
+      return parseItemAssets(JSON.parse(resp.responseText), appid);
     } catch {
       return null;
     }
@@ -756,15 +782,16 @@
     const appid = parseAppId(location.pathname);
     if (!appid) return;
 
-    const [zh, en] = await Promise.all([
+    const [zh, en, assets] = await Promise.all([
       fetchAppDetails(appid, 'schinese'),
       fetchAppDetails(appid, 'english'),
+      fetchItemAssets(appid),
     ]);
     if (!zh) return; // 下架 / 区域封锁：静默早退
     if (!isSupportedType(zh.type)) return; // DLC / 原声带 / demo：静默早退
 
     const payload = buildPayload({
-      zh, en, appid, url: `https://store.steampowered.com/app/${appid}/`, now: Date.now(),
+      zh, en, appid, assets, url: `https://store.steampowered.com/app/${appid}/`, now: Date.now(),
     });
     renderBadge('loading', payload, null);
     const result = await dedup(payload);

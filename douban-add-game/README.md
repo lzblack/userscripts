@@ -27,6 +27,7 @@
 - **不刮 Steam 的 DOM**，全部走官方 `store.steampowered.com/api/appdetails`。因此页面改版不影响，成人内容年龄门也不需要特判。
 - **拉两份响应**：`l=schinese` 给中文名与中文简介，`l=english` 只为拿可解析的发行日期——中文那份返回的是「2020 年 9 月 17 日」。
 - **类型按 genre id 映射**，不按文案：id 跨语言稳定，description 会变。映射目标是**建条目页那 19 个类型的名字**——`/game/explore` 筛选器上只有 15 个（少了卡牌 / 大型多人在线 / 光枪射击 / 文字冒险），那套 id 对建条目页不作数，所以回填按标签文本匹配复选框、不认 id。Steam 的「独立 / 休闲 / 免费开玩 / 抢先体验」在豆瓣无处可落，进告警让人工补，不猜。
+- **竖版封面只认 `IStoreBrowseService/GetItems` 给的文件名，不拼路径**。Steam 换素材后旧文件不删：3470490 改名 Mindbreak 后，appid 裸路径上的 `library_600x900*.jpg` 仍是改名前 Mindbound 的图且照样返回 200，按路径猜会注入别的游戏的封面。GetItems 拿不到时退回 appdetails 的 `header_image`（横版，但一定是现行的）。
 - **平台只填 Steam 能确知的三个**（PC / Mac / Linux），主机平台留空。
 - **查重没有主键**。图书有 ISBN，`/isbn/404` 是硬证据；游戏只能按名字搜 `www.douban.com/search?cat=3114`，所以「没搜到」只作弱信号呈现，措辞是「没搜到」而非「未收录」。中英名各搜一次后合并判定。
 - **中文名拿不到就留空**，不臆造翻译（Steam 没有中文商店名时 `l=schinese` 返回的仍是英文名）。
@@ -109,6 +110,7 @@ node --test douban-add-game.test.js
 
 - `@match` 仅 `store.steampowered.com/app/*` 与 `www.douban.com/game/create*`。成人内容游戏会先跳到 `/agecheck/app/…`，那一页不在匹配范围内，过了年龄门再看角标。
 - `@connect store.steampowered.com`：读官方 appdetails 接口。
+- `@connect api.steampowered.com`：读官方 GetItems 接口，只为拿到现行的竖版封面文件名。
 - `@connect www.douban.com`：用你的登录态搜索该游戏是否已收录（只读，不做任何写操作）。
 - `@connect shared.akamai.steamstatic.com`：抓取封面图。
 - 不上传任何数据、不接入第三方或分析服务。
