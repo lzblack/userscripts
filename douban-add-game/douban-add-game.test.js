@@ -13,6 +13,7 @@ const {
   latinSegment,
   isTitleMatch,
   isSearchResultsPage,
+  searchFailureReason,
   mapGenres,
   mapPlatforms,
   GENRE_MAP,
@@ -463,6 +464,28 @@ test('bywater 前端的有结果页：认得出、解析得出、查重判得出
 
 test('isSearchResultsPage: 光有 .search-result 不够，还得有搜索配置', () => {
   assert.equal(isSearchResultsPage('<div class="search-result"></div>'), false);
+});
+
+// ── searchFailureReason ─────────────────────────────────────────────────────
+// 「查重失败」原先不分原因；这里把每种失败说清楚，角标和控制台才能定位。
+test('searchFailureReason: 真结果页返回 null', () => {
+  const resp = { status: 200, finalUrl: 'https://www.douban.com/search?cat=3114&q=Hades', responseText: BYWATER_HITS_HTML };
+  assert.equal(searchFailureReason(resp), null);
+});
+
+test('searchFailureReason: 非 200 报状态码', () => {
+  assert.match(searchFailureReason({ status: 403, responseText: '' }), /HTTP 403/);
+});
+
+test('searchFailureReason: 被跳出 /search（验证码/风控）时报落地地址', () => {
+  const resp = { status: 200, finalUrl: 'https://sec.douban.com/b?r=x', responseText: '<html></html>' };
+  assert.match(searchFailureReason(resp), /sec\.douban\.com/);
+});
+
+test('searchFailureReason: 页面结构对不上时说缺哪个标记', () => {
+  const base = { status: 200, finalUrl: 'https://www.douban.com/search?cat=3114&q=x' };
+  assert.match(searchFailureReason({ ...base, responseText: '<div class="search-result"></div>' }), /搜索配置/);
+  assert.match(searchFailureReason({ ...base, responseText: 'BYWATER.search.resultConfig = {}' }), /search-result/);
 });
 
 test('isSearchResultsPage: 200 的验证码/风控页不认，避免假装「没搜到」', () => {

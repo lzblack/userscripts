@@ -299,6 +299,23 @@
     return /class="search-result"/.test(html) && SEARCH_CONFIG_RE.test(html);
   }
 
+  /**
+   * 一次搜索响应为什么不能用；能用返回 null。
+   * 「查重失败」原先把非 200、被跳去验证页、页面改版全收成同一句话，
+   * 出了事无从分辨，所以每种都给出可定位的原因。
+   * GM_xmlhttpRequest 会自动跟随跳转，风控页往往是 200 + 落地地址已不在 /search。
+   */
+  function searchFailureReason(resp) {
+    const r = resp || {};
+    if (r.status !== 200) return `HTTP ${r.status}`;
+    const finalUrl = str(r.finalUrl);
+    if (finalUrl && !/^https:\/\/www\.douban\.com\/search(?:[/?#]|$)/.test(finalUrl)) return `被跳转到 ${finalUrl}`;
+    const html = str(r.responseText);
+    if (!/class="search-result"/.test(html)) return '页面缺 .search-result（改版或风控页）';
+    if (!SEARCH_CONFIG_RE.test(html)) return '页面缺搜索配置（改版或风控页）';
+    return null;
+  }
+
   const RESULT_SPLIT_RE = /<div class="result">/g;
 
   /**
@@ -511,7 +528,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       parseAppId, parseDate, htmlToText, decodeEntities,
-      normalizeLatin, normalizeCjk, latinSegment, stripOuterBrackets, isTitleMatch, isSearchResultsPage,
+      normalizeLatin, normalizeCjk, latinSegment, stripOuterBrackets, isTitleMatch, isSearchResultsPage, searchFailureReason,
       mapGenres, mapPlatforms, coverCandidates, parseItemAssets, isSupportedType, isPayloadFresh,
       parseGameSearchResults, buildPayload, classifyDedup, buildFillPlan,
       normLabel, groupControls, detectStep,
@@ -604,8 +621,8 @@
   /** 单次搜索；风控/网络失败抛出，由 dedup 统一收成 error 态。 */
   async function searchDouban(query) {
     const resp = await deps.request(SEARCH_BASE + encodeURIComponent(query));
-    if (resp.status !== 200) throw new Error('douban search status ' + resp.status);
-    if (!isSearchResultsPage(resp.responseText)) throw new Error('douban search not a results page');
+    const reason = searchFailureReason(resp);
+    if (reason) throw new Error(reason);
     return parseGameSearchResults(resp.responseText);
   }
 
@@ -624,8 +641,10 @@
         result = classifyDedup(payload, items);
         if (result.kind === 'hit') return result;
       }
-    } catch {
-      return { kind: 'error' };
+    } catch (e) {
+      const reason = e && e.message ? e.message : String(e);
+      console.warn('[douban-add-game] 豆瓣查重失败：', reason);
+      return { kind: 'error', reason };
     }
     return result;
   }
@@ -735,7 +754,8 @@
     if (state === 'loading') return `<span style="color:${C.muted}">豆瓣 · 查重中…</span>`;
     if (state === 'error') {
       const q = encodeURIComponent(payload ? payload.titleEn : '');
-      return `${tag(C.bad, '豆瓣 · 查重失败')} <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener" style="${LINK_STYLE}">手动搜索 →</a>`;
+      const why = result && result.reason ? ` title="${escapeHtml(result.reason)}"` : '';
+      return `<b style="color:${C.bad}"${why}>豆瓣 · 查重失败</b> <a href="${SEARCH_BASE}${q}" target="_blank" rel="noopener" style="${LINK_STYLE}">手动搜索 →</a>`;
     }
     if (state === 'hit') return `${tag(C.ok, '豆瓣 · 已收录')} ${itemLink(result.item)}`;
     if (state === 'maybe') {
