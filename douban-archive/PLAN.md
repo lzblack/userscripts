@@ -70,10 +70,23 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 | m 站同源 `fetch`，用户名 | 50 | 50 | 0 |
 
 - 三种都是本人视角，GM 跨域带上了登录身份，方案 C 成立
-- 只有"GM 跨域 + 用户名"漏条，且每次漏的数目不同；原因未查明（同源用用户名不漏）。正式脚本先用 `/rexxar/api/v2/user/{用户名}` 换出数字 id，所有列表请求都用数字 id
+- ~~只有"GM 跨域 + 用户名"漏条~~ 撤回：只有一次采样，下面用数字 id 翻到底同样漏条
 - 私密仍未见到；用数字 id 把电影翻到底（`fetched` 应等于 `total`）再判第 3 条
 
-**第 3 条（2026-10-23）：** 成立。用户新加一条私密"想看"后，GM 跨域 + 数字 id 取想看第一页：`private: 1`，`subject.id` 为新加的那部（37068446）。但 `total` 仍为 1728（加之前也是 1728）：`total` 可能不含私密，或有缓存。翻页停止不能依赖 `total`，翻到空页才停；`total` 只用于核对，用翻到底的 `fetched` 与 `total` 的差判断是哪种。
+**第 3 条（2026-10-23）：** 成立。用户新加一条私密"想看"后，GM 跨域 + 数字 id 取想看第一页：`private: 1`，`subject.id` 为新加的那部（37068446）。但 `total` 仍为 1728（加之前也是 1728）：`total` 可能不含私密，或有缓存。翻页停止不能依赖 `total`，翻到空页才停；`total` 只用于核对，用翻到底的 `fetched` 与 `total` 的差判断是哪种。个人主页"想看"也显示 1728。
+
+**数字 id 翻到底（2026-10-23，翻到空页才停）：**
+
+| 书架 | total | 取到 | 私密 | 不足 50 条的中间页 |
+| --- | --- | --- | --- | --- |
+| 想看 | 1728 | 1680 | 1 | start=550（31）、950（28）、1100（43） |
+| 在看 | 55 | 55 | 0 | 无 |
+| 看过 | 2522（最后一次响应为 0） | 288 | 3 | start=200（38）；约 start=300 返回空页且 `total: 0`，被当成结束 |
+
+- 漏条与 uid 形式无关，位置每次不同（上一轮用户名漏在 300/350/500/…），像是服务端随机丢条目
+- 会出现 200、空页、`total: 0` 的异常响应，不能当作"翻完"
+- 豆伴（`extension/tasks/interest.js`）按 `ceil(total / 50)` 翻页，仅对 HTTP 500 拆成 `count=1` 重取，对短页不处理，可能同样漏条
+- 下一步：同一短页重复请求几次，看缺的条目能否补回（§2.1"重复取同一页"）
 
 **第 1 条结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`，探针的上一版）：** 成立，用方案 C。
 
@@ -85,7 +98,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 - Rexxar 校验 Referer；Tampermonkey 的 `GM_xmlhttpRequest` 能设 `Referer`。`X-Override-Referer` 是豆伴扩展内部改写 Referer 用的，豆瓣不认
 - 跨子域请求带上了登录身份：200 本身不能证明（公开标记不登录也能读），由下方身份探针的 `is_editable` 全为真证明；`ck` 能从 www 的 `document.cookie` 读到
-- uid 必须用数字 id：用户名在 GM 跨域时会漏条，见下方身份探针
+- uid：用户名与数字 id 都能用；"用户名会漏条"的判断已撤回（见下方翻到底结果）
 
 ### 2.1 探针（临时脚本，不进仓库）
 
@@ -189,6 +202,31 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
       privateSubjectIds: rows.filter(i => i.is_private).map(i => i.subject && i.subject.id) };
     console.log(result);
     alert(`豆仓探针：${JSON.stringify(result)}`);
+  });
+  // 漏条是否随机：同一页重复取 5 次，比较条数与 id 并集；再看看过 start=300 是否仍返回空
+  GM_registerMenuCommand('豆仓探针：重复取同一页', async () => {
+    alert('豆仓探针：开始重复取（约 30 秒，完成时会再弹窗）');
+    const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+    let numericId;
+    try { numericId = JSON.parse((await get(`https://m.douban.com/rexxar/api/v2/user/${UID}?ck=${ck}&for_mobile=1`)).responseText).id; } catch { /* 下面停止 */ }
+    if (!numericId) { alert('豆仓探针：读不到数字 id'); return; }
+    const url = (status, start) => `https://m.douban.com/rexxar/api/v2/user/${numericId}/interests?type=movie&status=${status}&start=${start}&count=50&ck=${ck}&for_mobile=1`;
+    const runs = [];
+    const union = new Set();
+    for (const [status, start, times] of [['mark', 550, 5], ['done', 300, 2]]) {
+      for (let k = 0; k < times; k++) {
+        await new Promise(s => setTimeout(s, 3000));
+        const r = await get(url(status, start));
+        let j;
+        try { j = JSON.parse(r.responseText); } catch { runs.push({ status, start, http: r.status, notJson: true }); continue; }
+        const ids = (j.interests || []).map(i => i.id);
+        if (status === 'mark') ids.forEach(id => union.add(id));
+        runs.push({ status, start, http: r.status, code: j.code, total: j.total, page: ids.length });
+      }
+    }
+    console.table(runs);
+    console.log({ markStart550Union: union.size });
+    alert(`豆仓探针：${JSON.stringify({ runs: runs.map(x => `${x.status}@${x.start}:${x.page}/${x.total}`), markStart550Union: union.size })}`);
   });
   // §2.2：同一页（想看 start=300）比较用户名与数字 id，看是不是本人视角
   GM_registerMenuCommand('豆仓探针：身份', async () => {
