@@ -73,6 +73,8 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 - 只有"GM 跨域 + 用户名"漏条，且每次漏的数目不同；原因未查明（同源用用户名不漏）。正式脚本先用 `/rexxar/api/v2/user/{用户名}` 换出数字 id，所有列表请求都用数字 id
 - 私密仍未见到；用数字 id 把电影翻到底（`fetched` 应等于 `total`）再判第 3 条
 
+**第 3 条（2026-10-23）：** 成立。用户新加一条私密"想看"后，GM 跨域 + 数字 id 取想看第一页：`private: 1`，`subject.id` 为新加的那部（37068446）。但 `total` 仍为 1728（加之前也是 1728）：`total` 可能不含私密，或有缓存。翻页停止不能依赖 `total`，翻到空页才停；`total` 只用于核对，用翻到底的 `fetched` 与 `total` 的差判断是哪种。
+
 **第 1 条结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`，探针的上一版）：** 成立，用方案 C。
 
 | 请求头 | 结果 |
@@ -150,7 +152,8 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     const shelves = [];
     for (const status of ['mark', 'doing', 'done']) {
       let total, fetched = 0, priv = 0, shortPages = [], error;
-      for (let start = 0; total === undefined || start < total; start += 50) {
+      // 翻到空页才停，不按 total（total 可能不含私密）
+      for (let start = 0; start < 20000; start += 50) {
         console.log(`豆仓探针：movie ${status} start=${start}`);
         const r = await get(`https://m.douban.com/rexxar/api/v2/user/${numericId}/interests?type=movie&status=${status}&start=${start}&count=50&ck=${ck}&for_mobile=1`);
         let j;
@@ -158,6 +161,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
         if (r.status !== 200 || j.code) { error = { http: r.status, code: j.code, msg: j.msg }; break; }
         const rows = j.interests || [];
         total = j.total;
+        if (rows.length === 0) break;
         fetched += rows.length;
         priv += rows.filter(i => i.is_private).length;
         if (rows.length < 50 && start + 50 < total) shortPages.push({ start, page: rows.length });
