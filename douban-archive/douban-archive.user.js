@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         豆仓：豆瓣书影音标记与个人内容备份（含私密）
+// @name         豆仓：豆瓣书影音标记备份（含私密）
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @version      0.3.0
