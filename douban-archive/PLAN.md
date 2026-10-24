@@ -61,6 +61,18 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 两种解释：(a) 服务端没把请求当本人（GM 跨域没带上登录身份，或用户名 uid 被当作他人视角），私密被滤掉、页变短；(b) 缺的是已下架条目。§2.2 的身份探针用一页（想看 start=300）分辨：`is_editable` 是否为真、m 站同源 `fetch` 是否返回 50 条、数字 id 与用户名结果是否相同。都显示本人视角才考虑 (b)，再拿同区间的网页版列表比对缺的 id。(a) 成立则方案 C 不成立，回到方案 B。
 
+**身份探针（2026-10-23，想看 start=300，同一页）：**
+
+| 方式 | 本页条数 | `is_editable` | 私密 |
+| --- | --- | --- | --- |
+| www GM 跨域，用户名 `lzblack` | 34（翻到底时同一页 37） | 34 | 0 |
+| www GM 跨域，数字 id（`/rexxar/api/v2/user/lzblack` 返回的 `id`） | 50 | 50 | 0 |
+| m 站同源 `fetch`，用户名 | 50 | 50 | 0 |
+
+- 三种都是本人视角，GM 跨域带上了登录身份，方案 C 成立
+- 只有"GM 跨域 + 用户名"漏条，且每次漏的数目不同；原因未查明（同源用用户名不漏）。正式脚本先用 `/rexxar/api/v2/user/{用户名}` 换出数字 id，所有列表请求都用数字 id
+- 私密仍未见到；用数字 id 把电影翻到底（`fetched` 应等于 `total`）再判第 3 条
+
 **第 1 条结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`，探针的上一版）：** 成立，用方案 C。
 
 | 请求头 | 结果 |
@@ -70,8 +82,8 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 | `X-Override-Referer: https://m.douban.com/mine/` | 400，同上 |
 
 - Rexxar 校验 Referer；Tampermonkey 的 `GM_xmlhttpRequest` 能设 `Referer`。`X-Override-Referer` 是豆伴扩展内部改写 Referer 用的，豆瓣不认
-- ~~跨子域请求带上了登录 cookie（拿到 200 和数据）~~ 不成立的推断：公开标记不登录也能读，200 不证明带了登录身份，见下方第 3 条；`ck` 能从 www 的 `document.cookie` 读到
-- uid 用用户名（`lzblack`）能拿到数据；是否等同于数字 id（本人视角）待第 3 条判
+- 跨子域请求带上了登录身份：200 本身不能证明（公开标记不登录也能读），由下方身份探针的 `is_editable` 全为真证明；`ck` 能从 www 的 `document.cookie` 读到
+- uid 必须用数字 id：用户名在 GM 跨域时会漏条，见下方身份探针
 
 ### 2.1 探针（临时脚本，不进仓库）
 
@@ -131,12 +143,16 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
   GM_registerMenuCommand('豆仓探针：电影翻到底', async () => {
     alert('豆仓探针：开始翻电影（约 3 分钟，完成时会再弹窗）');
     const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+    let numericId;
+    try { numericId = JSON.parse((await get(`https://m.douban.com/rexxar/api/v2/user/${UID}?ck=${ck}&for_mobile=1`)).responseText).id; } catch { /* 下面停止 */ }
+    if (!numericId) { alert('豆仓探针：读不到数字 id'); return; }
+    await new Promise(s => setTimeout(s, 2000));
     const shelves = [];
     for (const status of ['mark', 'doing', 'done']) {
       let total, fetched = 0, priv = 0, shortPages = [], error;
       for (let start = 0; total === undefined || start < total; start += 50) {
         console.log(`豆仓探针：movie ${status} start=${start}`);
-        const r = await get(`https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=movie&status=${status}&start=${start}&count=50&ck=${ck}&for_mobile=1`);
+        const r = await get(`https://m.douban.com/rexxar/api/v2/user/${numericId}/interests?type=movie&status=${status}&start=${start}&count=50&ck=${ck}&for_mobile=1`);
         let j;
         try { j = JSON.parse(r.responseText); } catch { error = { http: r.status, finalUrl: r.finalUrl }; break; }
         if (r.status !== 200 || j.code) { error = { http: r.status, code: j.code, msg: j.msg }; break; }
@@ -147,7 +163,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
         if (rows.length < 50 && start + 50 < total) shortPages.push({ start, page: rows.length });
         await new Promise(s => setTimeout(s, 2000));
       }
-      shelves.push({ status, total, fetched, private: priv, shortPages: JSON.stringify(shortPages), error: error && JSON.stringify(error) });
+      shelves.push({ numericId, status, total, fetched, private: priv, shortPages: JSON.stringify(shortPages), error: error && JSON.stringify(error) });
       if (error) break;
     }
     console.table(shelves);
