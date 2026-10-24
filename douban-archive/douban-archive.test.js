@@ -7,6 +7,7 @@ const {
   interestsUrl, parseUsernameFromUrl, classifyResponse,
   createProgress, isProgressFresh, pageKey, runExport, buildExport, exportFilename,
   NEODB_HEADER, neodbCategory, beijingToIso, neodbMarkRow, csvLine, buildNeodbCsvFiles, buildZip, neodbZipFilename,
+  REMIND_INTERVAL_MS, shouldShowEntry, estimateTotalMs, estimateRemainingMs, totalFetched, summaryRows, formatNumber,
 } = require('./douban-archive.user.js');
 const zlib = require('node:zlib');
 
@@ -118,10 +119,10 @@ test('classifyResponse: 带 code 的 JSON 或非 200 的 JSON 是失败（§2 �
 
 // ── 翻页与停止 ────────────────────────────────────────────────────────────
 
-test('翻页：120 条按 50 翻，短的末页重取 3 次，下一页空且 start ≥ total 直接停', async () => {
+test('翻页：120 条按 50 翻，末页取到 total 就停，不重取也不再请求空页（total 含私密）', async () => {
   const { server, result, built } = await exportOne(shelfServer(rows(0, 120), 120));
   assert.equal(result.state, 'done');
-  assert.deepEqual(server.calls.map((c) => c.start), [0, 50, 100, 100, 100, 100, 150]);
+  assert.deepEqual(server.calls.map((c) => c.start), [0, 50, 100]);
   const m = shelfMeta(built, 'movie/mark');
   assert.deepEqual([m.fetched, m.private, m.consistent], [120, 0, true]);
   assert.deepEqual(m.anomalies, []);
@@ -232,7 +233,7 @@ test('翻页错位导致同一条出现在两页：按 id 去重', async () => {
 });
 
 test('节奏：请求之间等 INTERVAL_MS，第一次请求前不等', async () => {
-  const { server, io } = await exportOne(shelfServer(rows(0, 50), 50));
+  const { server, io } = await exportOne(shelfServer(rows(0, 120), 120));
   assert.equal(io.sleeps.length, server.calls.length - 1);
   assert.ok(io.sleeps.every((ms) => ms === INTERVAL_MS));
 });
@@ -432,4 +433,91 @@ test('buildZip: 不压缩的 zip，CRC 正确，内容可读回（含中文）',
 
 test('neodbZipFilename', () => {
   assert.equal(neodbZipFilename('lzblack', new Date(2026, 9, 3)), 'douban-archive-lzblack-2026-10-03-neodb.zip');
+});
+
+// ── 界面用的纯逻辑 ────────────────────────────────────────────────────────
+
+const DAY = 24 * 60 * 60 * 1000;
+const NOW = 1000 * DAY;
+
+test('shouldShowEntry: 从没导出过就显示', () => {
+  assert.equal(shouldShowEntry({}, NOW), true);
+});
+
+test('shouldShowEntry: 导出过、没开提醒，不再显示', () => {
+  assert.equal(shouldShowEntry({ lastExportAt: NOW - 400 * DAY }, NOW), false);
+});
+
+test('shouldShowEntry: 开了提醒，满 30 天才显示', () => {
+  assert.equal(REMIND_INTERVAL_MS, 30 * DAY);
+  assert.equal(shouldShowEntry({ lastExportAt: NOW - 29 * DAY, remind: true }, NOW), false);
+  assert.equal(shouldShowEntry({ lastExportAt: NOW - 30 * DAY, remind: true }, NOW), true);
+});
+
+test('shouldShowEntry: 点过 ✕ 的暂停期内不显示，过了照常', () => {
+  assert.equal(shouldShowEntry({ snoozeUntil: NOW + 1 }, NOW), false);
+  assert.equal(shouldShowEntry({ snoozeUntil: NOW - 1 }, NOW), true);
+  assert.equal(shouldShowEntry({ lastExportAt: NOW - 60 * DAY, remind: true, snoozeUntil: NOW + DAY }, NOW), false);
+});
+
+test('estimateTotalMs: 按实测（9304 条约 21 分钟）估算，量级对', () => {
+  const min = estimateTotalMs(9304) / 60000;
+  assert.ok(min > 15 && min < 25, `${min}`);
+  assert.ok(estimateTotalMs(0) > 0);
+});
+
+test('estimateRemainingMs: 按本次已用时间与已取条数线性外推', () => {
+  assert.equal(estimateRemainingMs({ elapsedMs: 60000, fetchedThisRun: 500, fetched: 500, total: 1500 }), 120000);
+  // 续跑时之前取的条数不计入速率
+  assert.equal(estimateRemainingMs({ elapsedMs: 60000, fetchedThisRun: 500, fetched: 1000, total: 1500 }), 60000);
+});
+
+test('estimateRemainingMs: 还没取到条目或不知道总数时为 null', () => {
+  assert.equal(estimateRemainingMs({ elapsedMs: 5000, fetchedThisRun: 0, fetched: 0, total: 1500 }), null);
+  assert.equal(estimateRemainingMs({ elapsedMs: 5000, fetchedThisRun: 10, fetched: 10, total: null }), null);
+  assert.equal(estimateRemainingMs({ elapsedMs: 5000, fetchedThisRun: 10, fetched: 2000, total: 1500 }), 0);
+});
+
+test('totalFetched: 各书架已取条数之和', () => {
+  assert.equal(totalFetched({ shelves: { 'book/mark': { fetched: 100 }, 'movie/done': { fetched: 50 } } }), 150);
+  assert.equal(totalFetched({ shelves: {} }), 0);
+});
+
+test('onUpdate 带上全部书架的已取总数', async () => {
+  const two = [ONE[0], { type: 'book', status: 'done', key: 'book/done' }];
+  const server = fakeServer((key, start) => ok(60, rows(key === 'book/done' ? 100 : 0, key === 'book/done' ? 160 : 60).slice(start, start + 50)));
+  const io = fakeIo(server);
+  const updates = [];
+  await runExport({ progress: createProgress('u', '1', 0), io, shelves: two, onUpdate: (u) => updates.push(u) });
+  assert.equal(updates[updates.length - 1].totalFetched, 120);
+});
+
+test('summaryRows: 每类一行，书架名与条数，对不上的标出', () => {
+  const meta = { shelves: [
+    { type: 'book', status: 'mark', label: '想读', fetched: 2001, lastTotal: 2001, consistent: true },
+    { type: 'book', status: 'done', label: '读过', fetched: 1013, lastTotal: 1014, consistent: false },
+    { type: 'drama', status: 'done', label: '看过的舞台剧', fetched: 23, lastTotal: 23, consistent: true },
+  ] };
+  assert.deepEqual(summaryRows(meta), [
+    { type: '书', items: [{ label: '想读', fetched: 2001, total: 2001, ok: true }, { label: '读过', fetched: 1013, total: 1014, ok: false }] },
+    { type: '剧', items: [{ label: '看过', fetched: 23, total: 23, ok: true }] },
+  ]);
+});
+
+test('formatNumber: 千分位', () => {
+  assert.equal(formatNumber(9304), '9,304');
+  assert.equal(formatNumber(23), '23');
+});
+
+test('末页没取到 total 时照常重取（暂时丢条）', async () => {
+  const all = rows(0, 120);
+  const { server, built } = await exportOne((key, start, n) =>
+    ok(120, start === 100 && n === 1 ? all.slice(100, 110) : all.slice(start, start + 50)));
+  assert.deepEqual(server.calls.map((c) => c.start), [0, 50, 100, 100]);
+  assert.equal(shelfMeta(built, 'movie/mark').fetched, 120);
+});
+
+test('整页正好取到 total（100 条）也不再请求下一页', async () => {
+  const { server } = await exportOne(shelfServer(rows(0, 100), 100));
+  assert.deepEqual(server.calls.map((c) => c.start), [0, 50]);
 });

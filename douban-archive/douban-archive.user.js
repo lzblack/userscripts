@@ -2,7 +2,7 @@
 // @name         豆仓：豆瓣书影音标记与个人内容备份（含私密）
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.2.0
+// @version      0.3.0
 // @author       lzblack
 // @description  在已登录的豆瓣页面导出自己全部的书、影、音、游戏、舞台剧标记（含私密），下载为 JSON 与 NeoDB CSV。只在本机处理，不联系豆瓣以外的任何地址
 // @match        https://www.douban.com/*
@@ -24,7 +24,7 @@
 
   // ============ 常量 ============
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
 
   const TYPES = ['book', 'movie', 'music', 'game', 'drama'];
   // 舞台剧没有"在看"
@@ -126,9 +126,11 @@
       }
       for (const r of res.rows) merged.set(String(r.id), r);
 
-      if (merged.size >= PAGE_SIZE) return { kind: 'page', rows: [...merged.values()], end: false };
-      // 正常末尾：只有空页才算到头，短页可能是服务端暂时丢条
-      if (merged.size === 0 && res.total > 0 && start >= res.total) return { kind: 'page', rows: [], end: true };
+      // total 含私密（§2 全量导出证实）：取到 total 就是取全了，不重取、不再请求空页；
+      // 没到 total 的短页可能是服务端暂时丢条，要重取
+      // 整页却超过 total 说明 total 偏小（导出中途新加了标记），继续翻
+      const reached = res.total > 0 && (merged.size < PAGE_SIZE ? start + merged.size >= res.total : start + merged.size === res.total);
+      if (merged.size >= PAGE_SIZE || reached) return { kind: 'page', rows: [...merged.values()], end: reached };
       if (attempt >= MAX_REFETCH) break;
     }
     if (merged.size === 0) {
@@ -150,21 +152,25 @@
     while (progress.shelfIndex < shelves.length) {
       const shelf = shelves[progress.shelfIndex];
       const st = shelfState(progress, shelf.key);
-      onUpdate({ shelf, fetched: st.fetched, index: progress.shelfIndex, count: shelves.length });
+      onUpdate({ shelf, fetched: st.fetched, totalFetched: totalFetched(progress), index: progress.shelfIndex, count: shelves.length });
       const r = await fetchPage(ctx, shelf, progress.start, st);
       if (r.kind === 'cancel') return { state: 'cancelled' };
       if (r.kind === 'pause') { save(); return { state: 'paused', reason: r.reason, http: r.http, shelf }; }
       if (r.kind === 'fail') { save(); return { state: 'failed', http: r.http, code: r.code, msg: r.msg, shelf }; }
+      const index = progress.shelfIndex;
+      if (r.rows.length) {
+        io.setValue(pageKey(shelf.key, progress.start), r.rows);
+        st.pages.push(progress.start);
+        st.fetched += r.rows.length;
+      }
       if (r.end) {
         progress.shelfIndex++;
         progress.start = 0;
       } else {
-        io.setValue(pageKey(shelf.key, progress.start), r.rows);
-        st.pages.push(progress.start);
-        st.fetched += r.rows.length;
         progress.start += PAGE_SIZE;
       }
       save();
+      onUpdate({ shelf, fetched: st.fetched, totalFetched: totalFetched(progress), index, count: shelves.length });
     }
     return { state: 'done' };
   }
@@ -347,6 +353,56 @@
     return exportFilename(uid, date).replace(/\.json$/, '-neodb.zip');
   }
 
+  // ============ 界面用的纯逻辑 ============
+
+  const REMIND_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
+  // 实测：9304 条约 21 分钟，约 243 次请求，每次约 5.2 秒（间隔 2 秒 + 接口耗时）
+  const MS_PER_REQUEST = 5200;
+  const TYPE_SHORT = { book: '书', movie: '影', music: '音', game: '游', drama: '剧' };
+  const SHELF_SHORT = { mark: { drama: '想看' }, done: { drama: '看过' } };
+
+  /**
+   * 首页侧栏入口什么时候出现：从没导出过；或开了定期提醒且满 30 天。
+   * 点过 ✕ 的暂停期内都不出现。cfg: { lastExportAt, remind, snoozeUntil }
+   */
+  function shouldShowEntry(cfg, now) {
+    if (cfg.snoozeUntil && now < cfg.snoozeUntil) return false;
+    if (!cfg.lastExportAt) return true;
+    return !!cfg.remind && now - cfg.lastExportAt >= REMIND_INTERVAL_MS;
+  }
+
+  /** 开始前的预计耗时：每页 50 条，每个书架的末页约多一次请求 */
+  function estimateTotalMs(total) {
+    return (Math.ceil(total / PAGE_SIZE) + SHELVES.length) * MS_PER_REQUEST;
+  }
+
+  /** 按本次运行的速率外推；续跑前取的条数不计入速率 */
+  function estimateRemainingMs({ elapsedMs, fetchedThisRun, fetched, total }) {
+    if (!total || fetchedThisRun <= 0) return null;
+    return Math.max(0, total - fetched) * (elapsedMs / fetchedThisRun);
+  }
+
+  function totalFetched(progress) {
+    return Object.values(progress.shelves).reduce((n, st) => n + st.fetched, 0);
+  }
+
+  /** 完成卡片：每类一行 */
+  function summaryRows(meta) {
+    const rows = [];
+    for (const s of meta.shelves) {
+      const type = TYPE_SHORT[s.type];
+      let row = rows.find((r) => r.type === type);
+      if (!row) { row = { type, items: [] }; rows.push(row); }
+      const label = (SHELF_SHORT[s.status] && SHELF_SHORT[s.status][s.type]) || s.label;
+      row.items.push({ label, fetched: s.fetched, total: s.lastTotal === null ? 0 : s.lastTotal, ok: s.consistent });
+    }
+    return rows;
+  }
+
+  function formatNumber(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
   // ── node 测试导出（在任何 GM_/DOM 调用之前 return） ──────────────────────
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -354,6 +410,7 @@
       interestsUrl, parseUsernameFromUrl, classifyResponse,
       createProgress, isProgressFresh, pageKey, runExport, buildExport, exportFilename,
       NEODB_HEADER, neodbCategory, beijingToIso, neodbMarkRow, csvLine, buildNeodbCsvFiles, buildZip, neodbZipFilename,
+      REMIND_INTERVAL_MS, shouldShowEntry, estimateTotalMs, estimateRemainingMs, totalFetched, summaryRows, formatNumber,
     };
     return;
   }
@@ -400,40 +457,122 @@
     return { username, numericId: String(id) };
   }
 
-  // ── 面板 ──
+  /** 全部标记的总数（豆伴的用法：不带类型，count=1）；拿不到就是 null，界面不显示总数 */
+  async function fetchGrandTotal(numericId) {
+    const res = classifyResponse(await gmGet(
+      `https://m.douban.com/rexxar/api/v2/user/${numericId}/interests?ck=${readCk()}&count=1&for_mobile=1`));
+    return res.kind === 'ok' && res.total > 0 ? res.total : null;
+  }
 
-  let panel = null;
+  // ── 设置（不随导出缓存清除） ──
+
+  const CFG = { lastExportAt: 'dacfg:lastExportAt', remind: 'dacfg:remind', snoozeUntil: 'dacfg:snoozeUntil' };
+  const readCfg = () => Object.fromEntries(Object.entries(CFG).map(([k, key]) => [k, GM_getValue(key)]));
+  const writeCfg = (k, v) => GM_setValue(CFG[k], v);
+
+  // ── 界面 ──
+
+  const CSS = `
+.da-mod{margin-bottom:30px}
+.da-mod h2{color:#072;font-size:15px;margin:0 0 12px;line-height:150%;display:flex;justify-content:space-between}
+.da-mod p{color:#666;font-size:13px;line-height:1.7;margin:0 0 10px}
+.da-btn{display:inline-block;padding:4px 14px;border:1px solid #3ba94d;border-radius:3px;background:#3ba94d;color:#fff!important;font-size:13px;line-height:1.6;cursor:pointer;text-decoration:none!important}
+.da-btn:hover{background:#2e963d;border-color:#2e963d}
+.da-btn.da-plain{background:#fff;color:#3ba94d!important}
+.da-btn.da-plain:hover{background:#f2f8f2}
+.da-x{color:#999;cursor:pointer;font-size:14px;line-height:1;font-weight:normal}
+.da-card{position:fixed;right:20px;bottom:20px;z-index:99999;width:360px;max-width:calc(100vw - 40px);background:#fff;border:1px solid #dcdcdc;border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,.12);font:13px/1.7 Helvetica,Arial,sans-serif;color:#111;text-align:left}
+.da-head{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #eee;color:#072;font-size:14px}
+.da-body{padding:12px 14px}
+.da-body ul,.da-body ol{margin:4px 0 8px;padding-left:20px}
+.da-body ul li{list-style:disc}
+.da-body ol li{list-style:decimal}
+.da-muted{color:#888}
+.da-bar{height:6px;background:#eee;border-radius:3px;overflow:hidden;margin:4px 0 8px}
+.da-bar i{display:block;height:100%;background:#3ba94d;transition:width .3s}
+.da-row{display:flex;justify-content:space-between;gap:8px}
+.da-warn{background:#fff8e6;border:1px solid #f3dca0;border-radius:3px;padding:6px 8px;margin:8px 0}
+.da-ok{color:#2e963d}
+.da-bad{color:#c60}
+.da-table{width:100%;border-collapse:collapse;margin:6px 0}
+.da-table td{padding:2px 0;vertical-align:top}
+.da-table td:first-child{color:#888;width:28px}
+.da-foot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding:0 14px 12px}
+.da-link{color:#37a;cursor:pointer}`;
+
+  function injectCss() {
+    if (document.getElementById('da-css')) return;
+    const style = document.createElement('style');
+    style.id = 'da-css';
+    style.textContent = CSS;
+    document.head.appendChild(style);
+  }
+
+  /** el('div', { class: 'x', onclick }, '文本', 子节点…)；文本一律走 textNode，不拼 HTML */
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+      else if (k === 'style') node.style.cssText = v;
+      else node.setAttribute(k, v);
+    }
+    for (const c of children.flat(Infinity)) {
+      if (c === null || c === undefined || c === false) continue;
+      node.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+    }
+    return node;
+  }
+
+  const btn = (label, onclick, plain) => el('a', { class: plain ? 'da-btn da-plain' : 'da-btn', onclick }, label);
+
+  let card = null;
+
+  function showCard(title, body, buttons, closable) {
+    injectCss();
+    if (card) card.remove();
+    card = el('div', { class: 'da-card' },
+      el('div', { class: 'da-head' }, `豆仓 · ${title}`, closable ? el('span', { class: 'da-x', onclick: hideCard }, '✕') : null),
+      el('div', { class: 'da-body' }, body),
+      buttons && buttons.length ? el('div', { class: 'da-foot' }, buttons) : null);
+    document.body.appendChild(card);
+  }
+
+  function hideCard() {
+    if (card) { card.remove(); card = null; }
+  }
+
+  const minutes = (ms) => Math.max(1, Math.round(ms / 60000));
+  const shelfLabel = (shelf) => `${TYPE_SHORT[shelf.type]} · ${(SHELF_SHORT[shelf.status] && SHELF_SHORT[shelf.status][shelf.type]) || SHELF_LABELS[shelf.type][shelf.status]}`;
+
+  // ── 首页侧栏入口 ──
+
+  let entry = null;
+
+  function renderEntry() {
+    const aside = document.querySelector('.aside');
+    if (location.pathname !== '/' || !aside || !document.querySelector('.nav-user-account')) return;
+    const cfg = readCfg();
+    if (!shouldShowEntry(cfg, Date.now())) return;
+    injectCss();
+    const days = cfg.lastExportAt ? Math.floor((Date.now() - cfg.lastExportAt) / (24 * 60 * 60 * 1000)) : 0;
+    entry = el('div', { class: 'mod da-mod' },
+      el('h2', {}, '豆仓 · · · · · ·',
+        el('span', { class: 'da-x', title: '30 天内不再显示', onclick: () => { writeCfg('snoozeUntil', Date.now() + REMIND_INTERVAL_MS); removeEntry(); } }, '✕')),
+      el('p', {}, cfg.lastExportAt
+        ? `已经 ${days} 天没有备份豆瓣标记了。`
+        : '把你在豆瓣的全部书影音游戏舞台剧标记（含私密）导出到本机。'),
+      btn('导出我的标记', startExport));
+    aside.insertBefore(entry, aside.firstChild);
+  }
+
+  function removeEntry() {
+    if (entry) { entry.remove(); entry = null; }
+  }
+
+  // ── 流程 ──
+
   let running = false;
   let cancelRequested = false;
-
-  function showPanel(text, buttons = []) {
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99999;max-width:340px;padding:12px 14px;'
-        + 'background:#fff;color:#111;border:1px solid #ccc;border-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.15);'
-        + 'font:13px/1.6 sans-serif;white-space:pre-line';
-      document.body.appendChild(panel);
-    }
-    panel.textContent = `豆仓\n${text}`;
-    if (buttons.length) {
-      const bar = document.createElement('div');
-      bar.style.cssText = 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap';
-      for (const [label, onClick] of buttons) {
-        const b = document.createElement('button');
-        b.textContent = label;
-        b.style.cssText = 'padding:2px 10px;cursor:pointer';
-        b.addEventListener('click', onClick);
-        bar.appendChild(b);
-      }
-      panel.appendChild(bar);
-    }
-  }
-
-  function hidePanel() {
-    if (panel) { panel.remove(); panel = null; }
-  }
-
-  const shelfLabel = (shelf) => SHELF_LABELS[shelf.type][shelf.status];
 
   function saveFile(content, type, filename) {
     const a = document.createElement('a');
@@ -454,69 +593,108 @@
     return data;
   }
 
-  function summarize(data) {
+  const resume = () => run(io.getValue(PROGRESS_KEY));
+
+  function abandon() {
+    clearStorage();
+    hideCard();
+  }
+
+  function showRunning(u, startedAt, fetchedAtStart, grandTotal) {
+    const fetched = u.totalFetched;
+    const eta = estimateRemainingMs({
+      elapsedMs: Date.now() - startedAt, fetchedThisRun: fetched - fetchedAtStart, fetched, total: grandTotal,
+    });
+    showCard('正在导出', [
+      el('div', { class: 'da-row' },
+        el('span', {}, shelfLabel(u.shelf), ' ', el('span', { class: 'da-muted' }, `（第 ${u.index + 1} / ${u.count} 个书架）`)),
+        el('span', {}, grandTotal ? `${formatNumber(fetched)} / ${formatNumber(grandTotal)}` : `已取 ${formatNumber(fetched)} 条`)),
+      grandTotal ? el('div', { class: 'da-bar' }, el('i', { style: `width:${Math.min(100, (fetched / grandTotal) * 100).toFixed(1)}%` })) : null,
+      el('div', { class: 'da-muted' }, cancelRequested ? '正在取消…'
+        : `${eta === null ? '' : `约剩 ${minutes(eta)} 分钟 · `}请保持本标签页打开`),
+    ], [btn('取消', () => { cancelRequested = true; showRunning(u, startedAt, fetchedAtStart, grandTotal); }, true)]);
+  }
+
+  function showDone(data) {
+    const rows = summaryRows(data.meta);
     const total = data.meta.shelves.reduce((n, s) => n + s.fetched, 0);
     const priv = data.meta.shelves.reduce((n, s) => n + s.private, 0);
-    const bad = data.meta.shelves.filter((s) => !s.consistent || s.anomalies.length);
-    const lines = [`已导出 ${total} 条（私密 ${priv} 条）。`];
-    if (bad.length) {
-      lines.push('以下书架条数与豆瓣的总数对不上，详情见文件 meta：');
-      for (const s of bad) lines.push(`· ${s.label}：取到 ${s.fetched}（私密 ${s.private}），豆瓣总数 ${s.lastTotal}`);
-    }
-    return lines.join('\n');
+    const allOk = data.meta.shelves.every((s) => s.consistent);
+    const remindLine = el('div', { style: 'margin-top:6px' });
+    const renderRemind = () => {
+      remindLine.textContent = '';
+      if (readCfg().remind) remindLine.append(el('span', { class: 'da-muted' }, '已开启定期提醒：每 30 天在豆瓣首页提醒一次。'));
+      else remindLine.append('需要定期提醒你备份吗？', el('a', { class: 'da-link', onclick: () => { writeCfg('remind', true); renderRemind(); } }, '每 30 天提醒我'));
+    };
+    renderRemind();
+    showCard('导出完成', [
+      el('div', {}, allOk ? el('span', { class: 'da-ok' }, '✓ ') : null, el('b', {}, formatNumber(total)), ` 条（私密 ${priv} 条）`,
+        allOk ? `，${data.meta.shelves.length} 个书架全部核对一致` : ''),
+      el('table', { class: 'da-table' }, rows.map((r) => el('tr', {}, el('td', {}, r.type), el('td', {},
+        r.items.map((it, i) => [i ? ' · ' : '', it.ok
+          ? `${it.label} ${formatNumber(it.fetched)}`
+          : el('span', { class: 'da-bad' }, `${it.label} ${formatNumber(it.fetched)} ⚠ 豆瓣显示 ${formatNumber(it.total)}`)]))))),
+      allOk ? null : el('div', { class: 'da-muted' }, '有书架条数对不上，详情见 .json 文件的 meta；可以稍后重新导出。'),
+      el('div', { style: 'margin-top:6px' }, '已下载 ', el('b', {}, '.json'), '（完整存档）与 ', el('b', {}, '-neodb.zip'), '（可导入 NeoDB）。'),
+      el('div', { class: 'da-warn' }, '⚠ 导入 NeoDB 时请把可见性选为"仅自己"，否则私密标记会被公开。'),
+      remindLine,
+    ], [
+      btn('再下载一次', () => download(io.getValue(PROGRESS_KEY)), true),
+      btn('完成，清除缓存', () => { clearStorage(); hideCard(); }),
+    ], true);
   }
 
   async function run(progress) {
     if (running) return;
     running = true;
     cancelRequested = false;
-    const cancel = () => { cancelRequested = true; showPanel('正在取消…'); };
+    const startedAt = Date.now();
+    const fetchedAtStart = totalFetched(progress);
     let result;
     try {
       result = await runExport({
         progress, io, ck: readCk(), now: Date.now,
         isCancelled: () => cancelRequested,
-        onUpdate: ({ shelf, fetched, index, count }) =>
-          showPanel(`正在导出（${index + 1}/${count}）${shelfLabel(shelf)}：已取 ${fetched} 条`, [['取消', cancel]]),
+        onUpdate: (u) => showRunning(u, startedAt, fetchedAtStart, progress.grandTotal),
       });
     } catch (e) {
       // 比如存储写满：进度停在上一个页边界，可以再试
-      showPanel(`导出出错：${e && e.message}\n已取到的部分保留 24 小时。`,
-        [['继续', () => run(io.getValue(PROGRESS_KEY))], ['放弃', abandon]]);
+      showCard('出错了', [el('div', {}, `导出出错：${e && e.message}`), el('div', { class: 'da-muted' }, '已取到的部分保留 24 小时。')],
+        [btn('放弃', abandon, true), btn('继续', resume)]);
       return;
     } finally {
       running = false;
     }
 
+    const got = formatNumber(totalFetched(progress));
     if (result.state === 'cancelled') {
       clearStorage();
-      showPanel('已取消，已取到的数据已清除。', [['关闭', hidePanel]]);
+      showCard('已取消', [el('div', {}, '已取到的数据已清除。')], [btn('关闭', hideCard)], true);
     } else if (result.state === 'paused') {
-      showPanel(`已暂停（${shelfLabel(result.shelf)}）：豆瓣没有返回数据（${result.reason}）。\n`
-        + '可能需要安全验证：在新标签页打开豆瓣，按提示完成验证后回来点"继续"。进度保留 24 小时。',
-      [['继续', () => run(io.getValue(PROGRESS_KEY))], ['打开豆瓣', () => window.open('https://m.douban.com/mine/', '_blank')], ['放弃', abandon]]);
+      showCard('已暂停', [
+        el('div', {}, '豆瓣暂时没有返回数据，可能需要安全验证。'),
+        el('ol', {}, el('li', {}, '点"打开豆瓣"，按提示完成验证'), el('li', {}, '回到这里点"继续"，从断点接着导')),
+        el('div', { class: 'da-muted' }, `停在 ${shelfLabel(result.shelf)}，已取 ${got} 条，进度保留 24 小时。（${result.reason}）`),
+      ], [btn('放弃', abandon, true), btn('打开豆瓣', () => window.open('https://m.douban.com/mine/', '_blank'), true), btn('继续', resume)]);
     } else if (result.state === 'failed') {
-      showPanel(`导出停止（${shelfLabel(result.shelf)}）：豆瓣返回错误 ${result.http} ${result.code || ''} ${result.msg || ''}。\n`
-        + '没有下载半份数据。已取到的部分保留 24 小时，可以稍后点"继续"再试。',
-      [['继续', () => run(io.getValue(PROGRESS_KEY))], ['放弃', abandon]]);
+      showCard('导出停止', [
+        el('div', {}, `豆瓣返回错误（${shelfLabel(result.shelf)}）：${result.http} ${result.code || ''} ${result.msg || ''}`),
+        el('div', { class: 'da-muted' }, `没有下载半份数据。已取 ${got} 条，保留 24 小时，可以稍后点"继续"再试。`),
+      ], [btn('放弃', abandon, true), btn('继续', resume)]);
     } else {
       const data = download(progress);
-      showPanel(`${summarize(data)}\n已下载两个文件：.json 是完整存档，-neodb.zip 用于导入 NeoDB`
-        + '（NeoDB 导入时整批选可见性，选"公开"会把私密标记也公开）。\n文件确认保存后点"完成"清除浏览器里的缓存。',
-        [['再下载一次', () => download(io.getValue(PROGRESS_KEY))], ['完成', () => { clearStorage(); hidePanel(); }]]);
+      writeCfg('lastExportAt', Date.now());
+      removeEntry();
+      showDone(data);
     }
-  }
-
-  function abandon() {
-    clearStorage();
-    hidePanel();
   }
 
   async function startExport() {
     if (running) return;
     const existing = io.getValue(PROGRESS_KEY);
     if (isProgressFresh(existing, Date.now()) && existing.shelfIndex < SHELVES.length) {
-      showPanel('有一份未完成的导出。', [['继续', () => run(io.getValue(PROGRESS_KEY))], ['从头开始', startFresh]]);
+      showCard('有一份未完成的导出', [el('div', {}, `已取 ${formatNumber(totalFetched(existing))} 条，可以从断点接着导。`)],
+        [btn('从头开始', startFresh, true), btn('继续', resume)], true);
       return;
     }
     startFresh();
@@ -524,22 +702,49 @@
 
   async function startFresh() {
     if (running) return;
-    showPanel('正在读取当前用户…');
-    let user;
-    try { user = await resolveUser(); } catch (e) { showPanel(e.message, [['关闭', hidePanel]]); return; }
-    clearStorage();
-    const progress = createProgress(user.username, user.numericId, Date.now());
-    io.setValue(PROGRESS_KEY, progress);
-    run(progress);
+    showCard('导出我的标记', [el('div', { class: 'da-muted' }, '正在读取当前用户与标记总数…')], [], true);
+    let user, grandTotal;
+    try {
+      user = await resolveUser();
+      grandTotal = await fetchGrandTotal(user.numericId);
+    } catch (e) {
+      showCard('导出我的标记', [el('div', {}, e.message)], [btn('关闭', hideCard)], true);
+      return;
+    }
+    showCard('导出我的标记', [
+      el('div', {}, grandTotal
+        ? ['共 ', el('b', {}, formatNumber(grandTotal)), ' 条标记，预计约 ', el('b', {}, `${minutes(estimateTotalMs(grandTotal))} 分钟`), '。']
+        : '标记越多越久，约一万条要 20 分钟左右。'),
+      el('div', {}, '导出期间请保持本标签页打开；中途关掉也没关系，24 小时内可回来继续。'),
+      el('div', { style: 'margin-top:8px' }, '完成后下载两个文件：'),
+      el('ul', {}, el('li', {}, el('b', {}, '.json'), ' 完整存档（含私密）'), el('li', {}, el('b', {}, '-neodb.zip'), ' 可导入 NeoDB')),
+      el('div', { class: 'da-muted' }, '数据只在你的浏览器里处理，不上传到任何地方。'),
+    ], [btn('取消', hideCard, true), btn('开始导出', () => {
+      clearStorage();
+      const progress = createProgress(user.username, user.numericId, Date.now());
+      progress.grandTotal = grandTotal;
+      io.setValue(PROGRESS_KEY, progress);
+      run(progress);
+    })], true);
+  }
+
+  function toggleRemind() {
+    const on = !readCfg().remind;
+    writeCfg('remind', on);
+    showCard('定期提醒', [el('div', {}, on ? '已开启：距上次导出满 30 天时，在豆瓣首页侧栏提醒一次。' : '已关闭定期提醒。')],
+      [btn('好', hideCard)], true);
   }
 
   GM_registerMenuCommand('导出全部标记', startExport);
+  GM_registerMenuCommand('开启 / 关闭定期提醒', toggleRemind);
 
   // 关掉页面也能续：有未完成的进度就提示；过期的清掉
   const pending = io.getValue(PROGRESS_KEY);
   if (pending && !isProgressFresh(pending, Date.now())) {
     clearStorage();
   } else if (pending && pending.shelfIndex < SHELVES.length) {
-    showPanel('有一份未完成的导出。', [['继续', () => run(io.getValue(PROGRESS_KEY))], ['放弃', abandon]]);
+    showCard('有一份未完成的导出', [el('div', {}, `已取 ${formatNumber(totalFetched(pending))} 条，可以从断点接着导。`)],
+      [btn('放弃', abandon, true), btn('继续', resume)], true);
   }
+  renderEntry();
 })();
