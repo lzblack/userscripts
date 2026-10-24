@@ -36,7 +36,7 @@ function fakeServer(handler) {
   };
 }
 
-// 一个书架完整的数据，按 start 切页；total 为公开条数
+// 一个书架完整的数据，按 start 切页；total 含私密（§2：2026-10-23 全量导出证实）
 const shelfServer = (all, total) => (key, start) => ok(total, all.slice(start, start + PAGE_SIZE));
 
 function fakeIo(server) {
@@ -161,18 +161,24 @@ test('末页一直返回 total: 0 的空页：停，且不拿 0 覆盖已见到�
   assert.deepEqual([m.lastTotal, m.fetched, m.consistent], [120, 120, true]);
 });
 
-test('私密排在 total 之后：total 60、61 条（末条私密）全部取到，核对一致', async () => {
+test('total 含私密：61 条（1 条私密）、total 61，核对一致', async () => {
   const all = [...rows(0, 60), row(60, true)];
-  const { built } = await exportOne(shelfServer(all, 60));
+  const { built } = await exportOne(shelfServer(all, 61));
   const m = shelfMeta(built, 'movie/mark');
   assert.deepEqual([m.fetched, m.private, m.consistent], [61, 1, true]);
 });
 
-test('私密很多、整页都在 total 之后也继续翻', async () => {
+test('少取了条数等于私密数时不能算一致', async () => {
+  const all = [...rows(0, 60), row(60, true)];
+  const { built } = await exportOne((key, start) => ok(62, all.slice(start, start + 50)));
+  assert.equal(shelfMeta(built, 'movie/mark').consistent, false);
+});
+
+test('total 偏小时多出来的条目也继续翻（不见短页就停）', async () => {
   const all = [...rows(0, 40), ...rows(40, 130, true)];
   const { built } = await exportOne(shelfServer(all, 40));
   const m = shelfMeta(built, 'movie/mark');
-  assert.deepEqual([m.fetched, m.private, m.consistent], [130, 90, true]);
+  assert.deepEqual([m.fetched, m.private, m.consistent], [130, 90, false]);
 });
 
 test('真的空书架：total: 0 的空页重取 3 次后停', async () => {
@@ -183,8 +189,8 @@ test('真的空书架：total: 0 的空页重取 3 次后停', async () => {
   assert.deepEqual(built.interests.movie.mark, []);
 });
 
-test('全是私密的书架：total 0、3 条，取到 3 条', async () => {
-  const { built } = await exportOne(shelfServer(rows(0, 3, true), 0));
+test('全是私密的书架：total 3、3 条，取到 3 条', async () => {
+  const { built } = await exportOne(shelfServer(rows(0, 3, true), 3));
   const m = shelfMeta(built, 'movie/mark');
   assert.deepEqual([m.fetched, m.private, m.consistent], [3, 3, true]);
 });

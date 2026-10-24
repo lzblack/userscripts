@@ -2,7 +2,7 @@
 // @name         豆仓：豆瓣书影音标记与个人内容备份（含私密）
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.1.0
+// @version      0.1.1
 // @author       lzblack
 // @description  在已登录的豆瓣页面导出自己全部的书、影、音、游戏、舞台剧标记（含私密），下载为 JSON。只在本机处理，不联系豆瓣以外的任何地址
 // @match        https://www.douban.com/*
@@ -24,7 +24,7 @@
 
   // ============ 常量 ============
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
 
   const TYPES = ['book', 'movie', 'music', 'game', 'drama'];
   // 舞台剧没有"在看"
@@ -127,7 +127,7 @@
       for (const r of res.rows) merged.set(String(r.id), r);
 
       if (merged.size >= PAGE_SIZE) return { kind: 'page', rows: [...merged.values()], end: false };
-      // 正常末尾：total 不含私密，私密排在其后，所以只有空页才算到头
+      // 正常末尾：只有空页才算到头，短页可能是服务端暂时丢条
       if (merged.size === 0 && res.total > 0 && start >= res.total) return { kind: 'page', rows: [], end: true };
       if (attempt >= MAX_REFETCH) break;
     }
@@ -193,8 +193,8 @@
         type: shelf.type, status: shelf.status, label: SHELF_LABELS[shelf.type][shelf.status],
         firstTotal: st.firstTotal, lastTotal: st.lastTotal,
         fetched: list.length, private: priv,
-        // total 不含私密（§2，待全量证实）
-        consistent: list.length - priv === total,
+        // total 含私密（§2：2026-10-23 全量导出，三个有私密的书架都是 取到 = total）
+        consistent: list.length === total,
         anomalies: st.anomalies,
       });
     }
