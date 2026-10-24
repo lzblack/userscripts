@@ -27,7 +27,7 @@ v0.3.0。在 Firefox + Tampermonkey 上对一个 9304 条（含 6 条私密）�
 ## 测试
 
 ```sh
-node --test douban-archive/
+cd douban-archive && node --test
 ```
 
 纯逻辑（翻页与停止、重取合并、暂停 / 续跑 / 失败 / 取消、`meta` 核对、NeoDB 行转换、CSV 转义、zip 结构与 CRC、入口显示规则、预计时间）都有用例，假服务端按 §2 实测到的响应序列构造。界面用无头 Chromium 加载保存下来的首页、注入假的 GM 函数与接口做过端到端渲染（不进仓库）。
