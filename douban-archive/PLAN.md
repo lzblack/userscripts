@@ -51,6 +51,16 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 - uid：www 页面上 `/people/` 链接有 31 个（首页动态里的别人），自己的 `lzblack` 混在其中，§3 读 uid 不能取第一个，要认导航栏"我的豆瓣"
 - 3 待定：`is_private` 字段存在，但 14 个书架第一页私密数都为 0；用户的私密标记在电影里，用探针第二个命令把电影翻到底再判
 
+**电影翻到底（2026-10-23，www 上 GM 跨域，带 Referer）：** 第 3 条不成立，且发现新问题。
+
+| 书架 | total | 取到 | 私密 | 不足 50 条的中间页 | 错误 |
+| --- | --- | --- | --- | --- | --- |
+| 想看 | 1728 | 1582 | 0 | start=300/350/500/550/700/750/900/950/1200，每页 28–37 条 | 无 |
+| 在看 | 55 | 55 | 0 | 无 | 无 |
+| 看过 | 2522 | 150 | 0 | 无 | start=200 超时（15 秒），约连续第 40 个请求 |
+
+两种解释：(a) 服务端没把请求当本人（GM 跨域没带上登录身份，或用户名 uid 被当作他人视角），私密被滤掉、页变短；(b) 缺的是已下架条目。§2.2 的身份探针用一页（想看 start=300）分辨：`is_editable` 是否为真、m 站同源 `fetch` 是否返回 50 条、数字 id 与用户名结果是否相同。都显示本人视角才考虑 (b)，再拿同区间的网页版列表比对缺的 id。(a) 成立则方案 C 不成立，回到方案 B。
+
 **第 1 条结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`，探针的上一版）：** 成立，用方案 C。
 
 | 请求头 | 结果 |
@@ -60,8 +70,8 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 | `X-Override-Referer: https://m.douban.com/mine/` | 400，同上 |
 
 - Rexxar 校验 Referer；Tampermonkey 的 `GM_xmlhttpRequest` 能设 `Referer`。`X-Override-Referer` 是豆伴扩展内部改写 Referer 用的，豆瓣不认
-- 跨子域请求带上了登录 cookie（拿到 200 和数据）；`ck` 能从 www 的 `document.cookie` 读到
-- uid 用用户名（`lzblack`）即可，不必是数字 id
+- ~~跨子域请求带上了登录 cookie（拿到 200 和数据）~~ 不成立的推断：公开标记不登录也能读，200 不证明带了登录身份，见下方第 3 条；`ck` 能从 www 的 `document.cookie` 读到
+- uid 用用户名（`lzblack`）能拿到数据；是否等同于数字 id（本人视角）待第 3 条判
 
 ### 2.1 探针（临时脚本，不进仓库）
 
@@ -87,7 +97,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     onabort: () => resolve({ status: 'abort' }),
   }));
   GM_registerMenuCommand('豆仓探针', async () => {
-    alert('豆仓探针：开始（点确定后约 30 秒出结果）');
+    alert('豆仓探针：开始（约 30 秒，完成时会再弹窗）');
     const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
     const uidCandidates = [...new Set([...document.querySelectorAll('a[href*="/people/"]')]
       .map(a => (a.href.match(/\/people\/([^/?#]+)/) || [])[1]).filter(Boolean))];
@@ -119,7 +129,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
   });
   // 第 3 条：电影三个书架翻到底，只数条数与私密
   GM_registerMenuCommand('豆仓探针：电影翻到底', async () => {
-    alert('豆仓探针：电影翻到底（约 3 分钟）');
+    alert('豆仓探针：开始翻电影（约 3 分钟，完成时会再弹窗）');
     const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
     const shelves = [];
     for (const status of ['mark', 'doing', 'done']) {
@@ -143,6 +153,43 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     console.table(shelves);
     alert('豆仓探针：电影翻到底完成，结果在控制台');
   });
+  // §2.2：同一页（想看 start=300）比较用户名与数字 id，看是不是本人视角
+  GM_registerMenuCommand('豆仓探针：身份', async () => {
+    alert('豆仓探针：开始查身份（约 10 秒，完成时会再弹窗）');
+    const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+    const summarize = (label, r) => {
+      let j;
+      try { j = JSON.parse(r.responseText); } catch { return { label, http: r.status, finalUrl: r.finalUrl }; }
+      const rows = j.interests || [];
+      return { label, http: r.status, code: j.code, total: j.total, page: rows.length,
+        editable: rows.filter(i => i.is_editable).length, private: rows.filter(i => i.is_private).length };
+    };
+    const me = await get(`https://m.douban.com/rexxar/api/v2/user/${UID}?ck=${ck}&for_mobile=1`);
+    let numericId;
+    try { numericId = JSON.parse(me.responseText).id; } catch { /* 下面会显示 undefined */ }
+    const page = id => `https://m.douban.com/rexxar/api/v2/user/${id}/interests?type=movie&status=mark&start=300&count=50&ck=${ck}&for_mobile=1`;
+    const results = [summarize('username', await get(page(UID)))];
+    await new Promise(s => setTimeout(s, 2000));
+    if (numericId) results.push(summarize('numericId', await get(page(numericId))));
+    console.table(results);
+    console.log({ meHttp: me.status, numericId });
+    alert('豆仓探针：身份完成，结果在控制台');
+  });
+})();
+```
+
+### 2.2 m 站同源对照（控制台，不进仓库）
+
+在已登录的 `https://m.douban.com/mine/` 控制台跑，与 §2.1 "身份"命令请求同一页：
+
+```js
+(async () => {
+  const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+  const r = await fetch(`/rexxar/api/v2/user/lzblack/interests?type=movie&status=mark&start=300&count=50&ck=${ck}&for_mobile=1`, { credentials: 'include' });
+  const j = await r.json();
+  const rows = j.interests || [];
+  console.log({ http: r.status, code: j.code, total: j.total, page: rows.length,
+    editable: rows.filter(i => i.is_editable).length, private: rows.filter(i => i.is_private).length });
 })();
 ```
 
@@ -155,7 +202,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 - **uid：** 从页面或接口读出当前登录用户，不让用户填；读不到就提示并停止
 - **范围：** 书、影、音、游戏、舞台剧 × 想 / 在 / 过（舞台剧没有"在"），按请求的 `count` 翻页，不按返回条数（私密条目可能让页变短）
 - **节奏与风控：** 用的是用户自己的登录账号。串行，每次请求间隔 2 秒（约 10000 条标记约 200 次请求、7 分钟），不重试
-- **暂停与续跑：** 请求被转到安全验证（`sec.douban.com`，或响应不是 JSON）时暂停，提示用户在新标签页完成验证后点"继续"，从断点那一页接着取；进度（已取的页与条目）存在 `GM_setValue`，关掉页面也能续。其他错误（响应体有 `code`、非 200）停止整次导出，已取到的部分不下载（半份数据容易被当成全量）；续跑的进度保留 24 小时
+- **暂停与续跑：** 请求被转到安全验证（`sec.douban.com`，或响应不是 JSON）时暂停，提示用户在新标签页完成验证后点"继续"，从断点那一页接着取；进度（已取的页与条目）存在 `GM_setValue`，关掉页面也能续。请求超时也按安全验证处理（暂停、可续跑），不当作失败；其他错误（响应体有 `code`、非 200）停止整次导出，已取到的部分不下载（半份数据容易被当成全量）；续跑的进度保留 24 小时
 - **进度：** 页面上显示当前书架与条数，可以取消
 - **校验：** 每个书架取完后比较取到的条数与 `total`，不一致写进导出文件的 `meta` 并在完成时提示
 - **输出文件名：** `douban-archive-<uid>-<日期>.json` / `.xlsx`
