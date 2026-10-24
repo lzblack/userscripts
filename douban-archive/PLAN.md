@@ -44,6 +44,13 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 1 不成立就退回方案 B（§3）；2–4 任何一条不成立就回到这里重新设计。测完删掉探针。
 
+**2、4 的结果（2026-10-23，14 个书架各取第一页）：** 全部 200、无 `code`。
+
+- 2 成立：书 2001 / 277 / 1014、影 1728 / 55 / 2522、音 103 / 21 / 876（想 / 在 / 过）与个人主页一致；游戏（430 / 64 / 183）与舞台剧（6 / 23）未对照
+- 4 成立：条目字段 `charts comment create_time id is_editable is_private platforms rating sharing_text sharing_url status subject tags vote_count`；`subject` 含 `title url uri id type subtype cover_url pic rating year pubdate author press directors actors singer genres cn_name platforms` 等 44 个，各类别字段不同
+- uid：www 页面上 `/people/` 链接有 31 个（首页动态里的别人），自己的 `lzblack` 混在其中，§3 读 uid 不能取第一个，要认导航栏"我的豆瓣"
+- 3 待定：`is_private` 字段存在，但 14 个书架第一页私密数都为 0；用户的私密标记在电影里，用探针第二个命令把电影翻到底再判
+
 **第 1 条结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`，探针的上一版）：** 成立，用方案 C。
 
 | 请求头 | 结果 |
@@ -109,6 +116,32 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     console.table(shelves);
     console.log({ ckFound: !!ck, uidCandidates, sawPrivateKey, keys: [...keys], subjectKeys: [...subjectKeys] });
     alert('豆仓探针：完成，结果在控制台');
+  });
+  // 第 3 条：电影三个书架翻到底，只数条数与私密
+  GM_registerMenuCommand('豆仓探针：电影翻到底', async () => {
+    alert('豆仓探针：电影翻到底（约 3 分钟）');
+    const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+    const shelves = [];
+    for (const status of ['mark', 'doing', 'done']) {
+      let total, fetched = 0, priv = 0, shortPages = [], error;
+      for (let start = 0; total === undefined || start < total; start += 50) {
+        console.log(`豆仓探针：movie ${status} start=${start}`);
+        const r = await get(`https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=movie&status=${status}&start=${start}&count=50&ck=${ck}&for_mobile=1`);
+        let j;
+        try { j = JSON.parse(r.responseText); } catch { error = { http: r.status, finalUrl: r.finalUrl }; break; }
+        if (r.status !== 200 || j.code) { error = { http: r.status, code: j.code, msg: j.msg }; break; }
+        const rows = j.interests || [];
+        total = j.total;
+        fetched += rows.length;
+        priv += rows.filter(i => i.is_private).length;
+        if (rows.length < 50 && start + 50 < total) shortPages.push({ start, page: rows.length });
+        await new Promise(s => setTimeout(s, 2000));
+      }
+      shelves.push({ status, total, fetched, private: priv, shortPages: JSON.stringify(shortPages), error: error && JSON.stringify(error) });
+      if (error) break;
+    }
+    console.table(shelves);
+    alert('豆仓探针：电影翻到底完成，结果在控制台');
   });
 })();
 ```
