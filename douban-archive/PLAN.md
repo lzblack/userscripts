@@ -103,14 +103,19 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     xOverride: { 'X-Override-Referer': 'https://m.douban.com/mine/' },
   };
   const get = (url, headers) => new Promise(resolve => GM_xmlhttpRequest({
-    method: 'GET', url, headers, anonymous: false,
-    onload: r => resolve(r), onerror: e => resolve({ status: 'error', error: String(e && e.error) }),
+    method: 'GET', url, headers, anonymous: false, timeout: 15000,
+    onload: r => resolve(r),
+    onerror: e => resolve({ status: 'error', error: String(e && e.error) }),
+    ontimeout: () => resolve({ status: 'timeout' }),
+    onabort: () => resolve({ status: 'abort' }),
   }));
   GM_registerMenuCommand('豆仓探针', async () => {
+    console.log('豆仓探针：开始');
     const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
     const url = `https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=book&status=mark&start=0&count=50&ck=${ck}&for_mobile=1`;
     const results = [];
     for (const [name, headers] of Object.entries(variants)) {
+      console.log(`豆仓探针：请求 ${name}`);
       const r = await get(url, headers);
       let j;
       try { j = JSON.parse(r.responseText); } catch { j = null; }
@@ -122,6 +127,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     }
     console.table(results);
     console.log({ ckFound: !!ck });
+    alert('豆仓探针：完成，结果在控制台');
   });
 })();
 ```
