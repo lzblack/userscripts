@@ -165,7 +165,6 @@
         progress.start += PAGE_SIZE;
       }
       save();
-      onUpdate({ shelf, fetched: st.fetched, index: progress.shelfIndex, count: shelves.length });
     }
     return { state: 'done' };
   }
@@ -258,7 +257,7 @@
   async function resolveUser() {
     const r = await fetch('/mine/', { credentials: 'include' });
     const username = parseUsernameFromUrl(r.url);
-    if (!username) throw new Error('读不到当前登录的豆瓣用户，请先登录');
+    if (!username) throw new Error(`读不到当前登录的豆瓣用户，请先登录（/mine/ → ${r.status} ${r.url}）`);
     const raw = await gmGet(`https://m.douban.com/rexxar/api/v2/user/${encodeURIComponent(username)}?ck=${readCk()}&for_mobile=1`);
     if (classifyResponse(raw).kind !== 'ok') throw new Error('读不到数字 id（可能需要在豆瓣完成安全验证），稍后再试');
     // classifyResponse 只看列表字段，id 从原始 JSON 里取
@@ -375,11 +374,15 @@
   async function startExport() {
     if (running) return;
     const existing = io.getValue(PROGRESS_KEY);
-    if (isProgressFresh(existing, Date.now()) && existing.shelfIndex < SHELVES.length
-      && !confirm('有一份未完成的导出。确定放弃它、从头开始？')) {
-      run(existing);
+    if (isProgressFresh(existing, Date.now()) && existing.shelfIndex < SHELVES.length) {
+      showPanel('有一份未完成的导出。', [['继续', () => run(io.getValue(PROGRESS_KEY))], ['从头开始', startFresh]]);
       return;
     }
+    startFresh();
+  }
+
+  async function startFresh() {
+    if (running) return;
     showPanel('正在读取当前用户…');
     let user;
     try { user = await resolveUser(); } catch (e) { showPanel(e.message, [['关闭', hidePanel]]); return; }
