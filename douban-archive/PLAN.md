@@ -7,7 +7,7 @@ Status: v0.4，2026-10-23 第 2 步完成（JSON 导出实跑通过，见 §2 �
 在已登录豆瓣的浏览器里，导出自己的全部书影音游戏舞台剧标记，**含私密标记**，下载为：
 
 - **JSON：** 接口返回的原始条目，原样保存
-- **xlsx：** 豆伴的格式（NeoDB 可直接导入，见 §4），换个工具也能读
+- **NeoDB CSV（zip）：** NeoDB 自己的导出格式，可直接导入 NeoDB（见 §4）；纯文本，不用 xlsx（2026-10-23 定，原计划的豆伴 xlsx 作废）
 
 只做导出：不上传到任何服务器，不联系豆瓣以外的任何地址。文件拿去做什么是用户自己的事。
 
@@ -23,7 +23,7 @@ Status: v0.4，2026-10-23 第 2 步完成（JSON 导出实跑通过，见 §2 �
 | 豆伴（Chrome 扩展） | Rexxar | 全部 | 豆伴 xlsx | 只支持 Chromium，基本不维护 |
 | zcyoung2000/douban-backup（Python，2026-06） | 读浏览器 cookie 后请求 | 五类 | 豆伴 xlsx、SQLite、增量 | 要装 Python，把 cookie 交给脚本 |
 
-本脚本的不同：Rexxar JSON 后台翻页（每页 50 条，请求约为翻网页的三分之一，网页改版不受影响）；按 `is_private` 标出私密；五类 × 三状态一次导完；豆伴 / NeoDB 格式；与 `total` 核对。
+本脚本的不同：Rexxar JSON 后台翻页（每页 50 条，请求约为翻网页的三分之一，网页改版不受影响）；按 `is_private` 标出私密；五类 × 三状态一次导完；NeoDB CSV；与 `total` 核对。
 
 ## 2. 数据来源
 
@@ -296,19 +296,29 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 - **进度：** 页面上显示当前书架与条数，可以取消
 - **校验：** 每个书架取完后按 `id` 去重，比较取到的条数与 `total`（`total` 含私密，§2 第 2 步实跑证实）。`meta` 按书架记原始数字：首次与最后一次见到的 `total`、去重后条数、私密条数、是否一致、异常页；导出中途增删标记会让 `total` 变化、页错位，靠首末 `total` 看出来。不一致在完成时提示
-- **输出文件名：** `douban-archive-<uid>-<日期>.json` / `.xlsx`
+- **输出文件名：** `douban-archive-<uid>-<日期>.json` 与 `douban-archive-<uid>-<日期>-neodb.zip`，分两个文件下载（JSON 约 24 MB，NeoDB 网站的上传大小限制未知，zip 只放 CSV）
 
-## 4. xlsx 格式
+## 4. NeoDB CSV 格式
 
-照豆伴（NeoDB 的豆伴导入器 `neodb/journal/importers/douban.py` 按这个读）：
+2026-10-23 读 NeoDB 源码定（`neodb/journal/importers/csv.py`、`base.py`、`exporters/csv.py`）。NeoDB 支持十几种导入格式（豆伴 xlsx、Goodreads、Letterboxd、Steam、Trakt 等，还有它自己的 CSV 与 NDJSON）；选它自己的 CSV，因为纯文本、不需要 xlsx 库，且以链接定位条目，豆瓣链接本地没有时会远程抓取（`get_item_by_info_and_links`）。
 
-- sheet 名：`想读` `在读` `读过` `想看` `在看` `看过` `想听` `在听` `听过` `想玩` `在玩` `玩过` `想看的舞台剧` `看过的舞台剧`
-- 列：`[0]` 标题、`[3]` 链接、`[4]` 标记时间（北京时间 `YYYY-MM-DD HH:MM:SS`）、`[5]` 评分 1–5 或空、`[6]` 逗号分隔的标签、`[7]` 短评；其余列照豆伴的表头填
-- SheetJS 从 `cdn.sheetjs.com` 以固定版本 `@require`
+- **zip 结构：** 成员名 `{category}_mark.csv`，NeoDB 只读这些名字（`_CSV_MEMBER_NAMES`）。category 按条目的 `subject.type`，不按书架：`book` `movie` `tv` `music` `game`，舞台剧 `drama` → `performance`（用户实测的电影书架里有 tv 条目 947 条）。不压缩（store），手写，无外部依赖；NeoDB 解压上限 512 MB
+- **列（表头照 NeoDB 导出）：** `title, info, links, timestamp, status, rating, comment, tags`，另加一列 `visibility`
+  - `title`：`subject.title`
+  - `info`：空（豆瓣列表接口的 `subject` 不含 ISBN / IMDb）
+  - `links`：`subject.url`（如 `https://movie.douban.com/subject/…/`、游戏 `https://www.douban.com/game/…/`、舞台剧 `https://www.douban.com/location/drama/…/`）
+  - `timestamp`：`create_time` 是北京时间 `YYYY-MM-DD HH:MM:SS`，写成 `YYYY-MM-DDTHH:MM:SS+08:00`（NeoDB 对无时区的按 UTC 解析）
+  - `status`：想 / 在 / 过 → `wishlist` / `progress` / `complete`
+  - `rating`：`rating.value`（1–5，`max` 实测都是 5）× 2，无评分留空
+  - `comment`：短评；`tags`：`|` 连接（实测标签里没有 `|`，有则替换为空格）
+  - `visibility`：私密写 `2`（仅自己），其他留空。NeoDB 现在按整批导入设置可见性，不读这一列（`DictReader` 多出的列被忽略），给计划中的 NeoDB PR 用
+- **编码：** UTF-8 无 BOM（BOM 会让 NeoDB 读到的第一列名不是 `title`）；RFC 4180 引号转义，短评里的换行与引号保留
+- **私密：** 在 NeoDB 加上逐条可见性之前，导入时整批选可见性；选"公开"会把私密条目公开。完成提示与 README 要写明
+- **NeoDB PR（第 3 步验收后再提）：** CSV 导入器读可选的 `visibility` 列，逐条设可见性，缺省沿用整批设置
 
-Greasy Fork 规则（2026-10-23 核对 code-rules、external-scripts、cdns）：代码不得混淆或压缩；外部库要 `@require` 自认可的 CDN（`cdn.sheetjs.com`、`cdn.jsdelivr.net` 都在列）。本脚本不发数据给作者，不涉及 `@antifeature`。
+验收：按 NeoDB `CsvImporter` 的读法（`validate_file` 的成员名检查、`csv.DictReader`、`parse_shelf_type`、`parse_tags`、`parse_datetime`、`int(float(rating))`）用 Python 解析真实导出的 zip，各类条数之和与 JSON 一致、每行字段解析成功；能的话在 NeoDB 上真实导入一次（选"仅自己"）。
 
-验收：用一个真实导出跑一遍 NeoDB 的解析逻辑（或任何读豆伴格式的工具），各 sheet 条数与 JSON 一致。
+Greasy Fork 规则（2026-10-23 核对 code-rules、external-scripts、cdns）：代码不得混淆或压缩；本脚本无外部库。不发数据给作者，不涉及 `@antifeature`。
 
 ## 5. 豆伴的其他功能
 
@@ -325,7 +335,7 @@ v2 另有两项候选：封面 ZIP（byJming 已有）；Letterboxd（电影）�
 
 ## 5.1 路线（2026-10-23 定）
 
-- **v1：** 五类标记（含私密）导出为 JSON 与豆伴 xlsx；与 `total` 核对；遇安全验证暂停、可续跑（§3）
+- **v1：** 五类标记（含私密）导出为 JSON 与 NeoDB CSV；与 `total` 核对；遇安全验证暂停、可续跑（§3）
 - **v1.1：消失的标记与提醒。** 每次导出后在 `GM_setValue` 存一份摘要（每条标记的 id 与内容指纹：状态、评分、短评、标签的哈希，不存全文）。下次导出与它比较，给出新增、改过、消失三类；消失的条目从本次未出现的 id 里列出，标题与短评取自用户选择的上一份 JSON（摘要里没有全文）。比较结果写进导出文件的 `meta.diff`，并在完成时显示。另可手动选一份旧 JSON 与本次比较。距上次导出超过设定天数（默认 30）时，在豆瓣页面角落提示一次，不自动运行
 - **v2：** 个人写作（广播、长评、日记、读书笔记，JSON）；Obsidian / Markdown 导出（每部作品一篇笔记，YAML 头含评分、标签、标记时间、链接，正文为短评，fflate 打包 ZIP）；离线浏览页（单个 HTML 文件，数据内嵌，可搜索、按类别与评分筛选，无外部依赖）；封面 ZIP；Letterboxd / Goodreads CSV
 
@@ -337,7 +347,7 @@ v2 另有两项候选：封面 ZIP（byJming 已有）；Letterboxd（电影）�
 
 1. 跑 §2.1 的探针，结果写回 §2；第 1 条不成立则按方案 B，2–4 不成立则停
 2. 翻页、停止规则、暂停续跑、JSON 导出（测试覆盖翻页、`code` 停止、安全验证暂停与续跑、取消）
-3. xlsx 导出（测试覆盖行转换；用真实导出验收 §4）
+3. NeoDB CSV 导出（测试覆盖行转换、CSV 转义、zip 结构；用真实导出验收 §4）
 4. README、`GREASYFORK-DESCRIPTION.md`、仓库 `CLAUDE.md` 与 `README.md` 的脚本表，发布 Greasy Fork
 
 ## 7. 待定
