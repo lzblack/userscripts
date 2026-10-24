@@ -7,7 +7,7 @@ const {
   interestsUrl, parseUsernameFromUrl, classifyResponse,
   createProgress, isProgressFresh, pageKey, runExport, buildExport, exportFilename,
   NEODB_HEADER, neodbCategory, beijingToIso, neodbMarkRow, csvLine, buildNeodbCsvFiles, buildZip, neodbZipFilename,
-  REMIND_INTERVAL_MS, shouldShowEntry, estimateTotalMs, estimateRemainingMs, totalFetched, summaryRows, formatNumber,
+  REMIND_INTERVAL_MS, COUNT_INTERVAL_MS, countMarks, shouldShowEntry, estimateTotalMs, estimateRemainingMs, totalFetched, summaryRows, formatNumber,
 } = require('./douban-archive.user.js');
 const zlib = require('node:zlib');
 
@@ -520,4 +520,49 @@ test('末页没取到 total 时照常重取（暂时丢条）', async () => {
 test('整页正好取到 total（100 条）也不再请求下一页', async () => {
   const { server } = await exportOne(shelfServer(rows(0, 100), 100));
   assert.deepEqual(server.calls.map((c) => c.start), [0, 50]);
+});
+
+// ── 开始前统计总数（§2：不带 type 的 total 不含"在"、还会虚高，只能逐个书架加） ──
+
+async function count(handler, shelves = SHELVES) {
+  const server = fakeServer(handler);
+  const io = fakeIo(server);
+  const steps = [];
+  const total = await countMarks({ numericId: '42', ck: 'x', io, shelves, onStep: (i, n) => steps.push([i, n]) });
+  return { server, io, steps, total };
+}
+
+test('countMarks: 14 个书架各请求一次 count=1，total 相加', async () => {
+  const { server, io, steps, total } = await count((key) => ok(key === 'book/done' ? 1014 : 10, rows(0, 1)));
+  assert.equal(total, 1014 + 13 * 10);
+  assert.equal(server.calls.length, 14);
+  assert.deepEqual(server.calls.map((c) => c.key), SHELVES.map((s) => s.key));
+  assert.deepEqual(steps.at(-1), [14, 14]);
+  assert.ok(io.sleeps.every((ms) => ms === COUNT_INTERVAL_MS));
+});
+
+test('countMarks: 请求只取 1 条、带 ck', async () => {
+  const urls = [];
+  const io = fakeIo({ request: async (url) => { urls.push(new URL(url)); return ok(3, rows(0, 1)); } });
+  await countMarks({ numericId: '42', ck: 'abc', io, shelves: ONE, onStep: () => {} });
+  assert.equal(urls[0].searchParams.get('count'), '1');
+  assert.equal(urls[0].searchParams.get('ck'), 'abc');
+  assert.equal(urls[0].searchParams.get('type'), 'movie');
+  assert.equal(urls[0].searchParams.get('status'), 'mark');
+});
+
+test('countMarks: total:0 的空页重取（§2 偶发假空页），真空书架最终算 0', async () => {
+  const bogus = await count((key, start, n) => (n === 1 ? ok(0, []) : ok(7, rows(0, 1))), ONE);
+  assert.equal(bogus.total, 7);
+  const empty = await count(() => ok(0, []), ONE);
+  assert.equal(empty.total, 0);
+  assert.equal(empty.server.calls.length, 1 + MAX_REFETCH);
+});
+
+test('countMarks: 任一书架暂停或失败就返回 null，不给半个总数', async () => {
+  const paused = await count((key) => (key === 'music/doing' ? { failure: 'timeout' } : ok(5, rows(0, 1))));
+  assert.equal(paused.total, null);
+  const failed = await count((key) => (key === 'book/mark' ? { status: 400, responseText: '{"code":1287}' } : ok(5, rows(0, 1))));
+  assert.equal(failed.total, null);
+  assert.equal(failed.server.calls.length, 1);
 });

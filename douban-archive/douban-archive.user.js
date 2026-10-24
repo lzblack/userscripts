@@ -2,7 +2,7 @@
 // @name         豆仓：豆瓣书影音标记备份（含私密）
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.3.0
+// @version      0.3.1
 // @author       lzblack
 // @description  在已登录的豆瓣页面导出自己全部的书、影、音、游戏、舞台剧标记（含私密），下载为 JSON 与 NeoDB CSV。只在本机处理，不联系豆瓣以外的任何地址
 // @match        https://www.douban.com/*
@@ -53,9 +53,9 @@
 
   // ============ 纯逻辑 ============
 
-  function interestsUrl(numericId, type, status, start, ck) {
+  function interestsUrl(numericId, type, status, start, ck, count = PAGE_SIZE) {
     return `https://m.douban.com/rexxar/api/v2/user/${numericId}/interests`
-      + `?type=${type}&status=${status}&start=${start}&count=${PAGE_SIZE}&ck=${ck}&for_mobile=1`;
+      + `?type=${type}&status=${status}&start=${start}&count=${count}&ck=${ck}&for_mobile=1`;
   }
 
   /** /mine/ 会跳到 /people/{用户名}/，从跳转后的地址读用户名 */
@@ -373,6 +373,32 @@
     return !!cfg.remind && now - cfg.lastExportAt >= REMIND_INTERVAL_MS;
   }
 
+  // 统计只取 1 条，请求很轻，间隔比翻页短
+  const COUNT_INTERVAL_MS = 500;
+
+  /**
+   * 开始前的总数：逐个书架取 total 相加。不带 type 的 total 不含"在"，带 status 不带 type 又会虚高
+   * （§2：在 421 而实际可取 417），只有逐个书架加起来才和导出取到的条数对得上。
+   * total:0 的空页按 §2 重取；任一书架暂停或失败返回 null，不给半个总数。
+   */
+  async function countMarks({ numericId, ck, io, shelves = SHELVES, onStep }) {
+    let sum = 0;
+    for (let i = 0; i < shelves.length; i++) {
+      const { type, status } = shelves[i];
+      let total = 0;
+      for (let attempt = 0; attempt <= MAX_REFETCH; attempt++) {
+        await io.sleep(COUNT_INTERVAL_MS);
+        const res = classifyResponse(await io.request(interestsUrl(numericId, type, status, 0, ck, 1)));
+        if (res.kind !== 'ok') return null;
+        total = res.total;
+        if (total > 0 || res.rows.length > 0) break;
+      }
+      sum += total;
+      onStep(i + 1, shelves.length);
+    }
+    return sum;
+  }
+
   /** 开始前的预计耗时：每页 50 条，每个书架的末页约多一次请求 */
   function estimateTotalMs(total) {
     return (Math.ceil(total / PAGE_SIZE) + SHELVES.length) * MS_PER_REQUEST;
@@ -412,7 +438,7 @@
       interestsUrl, parseUsernameFromUrl, classifyResponse,
       createProgress, isProgressFresh, pageKey, runExport, buildExport, exportFilename,
       NEODB_HEADER, neodbCategory, beijingToIso, neodbMarkRow, csvLine, buildNeodbCsvFiles, buildZip, neodbZipFilename,
-      REMIND_INTERVAL_MS, shouldShowEntry, estimateTotalMs, estimateRemainingMs, totalFetched, summaryRows, formatNumber,
+      REMIND_INTERVAL_MS, COUNT_INTERVAL_MS, countMarks, shouldShowEntry, estimateTotalMs, estimateRemainingMs, totalFetched, summaryRows, formatNumber,
     };
     return;
   }
@@ -457,13 +483,6 @@
     const id = JSON.parse(raw.responseText).id;
     if (!id) throw new Error('读不到数字 id');
     return { username, numericId: String(id) };
-  }
-
-  /** 全部标记的总数（豆伴的用法：不带类型，count=1）；拿不到就是 null，界面不显示总数 */
-  async function fetchGrandTotal(numericId) {
-    const res = classifyResponse(await gmGet(
-      `https://m.douban.com/rexxar/api/v2/user/${numericId}/interests?ck=${readCk()}&count=1&for_mobile=1`));
-    return res.kind === 'ok' && res.total > 0 ? res.total : null;
   }
 
   // ── 设置（不随导出缓存清除） ──
@@ -704,11 +723,14 @@
 
   async function startFresh() {
     if (running) return;
-    showCard('导出我的标记', [el('div', { class: 'da-muted' }, '正在读取当前用户与标记总数…')], [], true);
+    showCard('导出我的标记', [el('div', { class: 'da-muted' }, '正在读取当前用户…')], [], true);
     let user, grandTotal;
     try {
       user = await resolveUser();
-      grandTotal = await fetchGrandTotal(user.numericId);
+      grandTotal = await countMarks({
+        numericId: user.numericId, ck: readCk(), io,
+        onStep: (i, n) => showCard('导出我的标记', [el('div', { class: 'da-muted' }, `正在统计标记总数… ${i} / ${n}`)], [], true),
+      });
     } catch (e) {
       showCard('导出我的标记', [el('div', {}, e.message)], [btn('关闭', hideCard)], true);
       return;
