@@ -35,22 +35,16 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 带登录 cookie，`ck` 取自同名 cookie；豆伴另设 `X-Override-Referer: https://m.douban.com/mine/`。
 
-**动手前要在已登录的 `https://m.douban.com/mine/` 控制台跑一次 §2.1**（只打印计数与字段名，不打印标题和短评），确认：
+**动手前在 Tampermonkey 里临时装 §2.1 的探针**，在已登录的 www.douban.com 页面点菜单"豆仓探针"。取数方式与正式脚本相同（www 上 `GM_xmlhttpRequest` 跨域），只打印计数与字段名，不打印标题和短评。确认：
 
-1. 同源 `fetch` 不设 Referer 头也能拿到数据，`ck` 能从 `document.cookie` 读到
+1. 跨域请求能拿到数据（带 cookie），`ck` 能从 `document.cookie` 读到；记下不设 Referer、设 `Referer`、设 `X-Override-Referer` 三种里哪些成功
 2. `total` 与豆瓣个人主页上该书架显示的数字一致
 3. 私密条目在返回里，且带 `is_private: true`
 4. 条目与 `subject` 的字段（标题、评分、短评、标签、标记时间、链接）都在
 
-任何一条不成立就回到这里重新设计。
+1 不成立就退回方案 B（§3）；2–4 任何一条不成立就回到这里重新设计。测完删掉探针。
 
-运行位置首选 www（§3 方案 C），所以还要在 Tampermonkey 里临时装 §2.2 的脚本，在已登录的 www.douban.com 页面点菜单"豆仓探针"，确认：
-
-5. www 上 `GM_xmlhttpRequest` 跨域请求 Rexxar 能拿到数据（带 cookie）；记下不设 Referer、设 `Referer`、设 `X-Override-Referer` 三种里哪些成功
-
-5 不成立（三种都失败）就退回方案 B。测完删掉这个临时脚本。
-
-**§2.2 结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`）：** 成立，用方案 C。
+**第 1 条结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`，探针的上一版）：** 成立，用方案 C。
 
 | 请求头 | 结果 |
 | --- | --- |
@@ -62,41 +56,9 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 - 跨子域请求带上了登录 cookie（拿到 200 和数据）；`ck` 能从 www 的 `document.cookie` 读到
 - uid 用用户名（`lzblack`）即可，不必是数字 id
 
-### 2.1 验证片段
+### 2.1 探针（临时脚本，不进仓库）
 
-每个书架只取第一页（14 次请求，约 30 秒）：`total` 对照个人主页的数字，私密与字段名在全部书架里找。另打印页面上能找到的 uid 候选，供 §3 自动读 uid。
-
-```js
-(async () => {
-  const UID = 'lzblack';
-  const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
-  const uidCandidates = [...new Set([...document.querySelectorAll('a[href*="/people/"]')]
-    .map(a => (a.href.match(/\/people\/([^/?#]+)/) || [])[1]).filter(Boolean))];
-  const shelves = [];
-  const keys = new Set(), subjectKeys = new Set();
-  let sawPrivateKey = false;
-  outer: for (const type of ['book', 'movie', 'music', 'game', 'drama']) {
-    for (const status of type === 'drama' ? ['mark', 'done'] : ['mark', 'doing', 'done']) {
-      const r = await fetch(`/rexxar/api/v2/user/${UID}/interests?type=${type}&status=${status}&start=0&count=50&ck=${ck}&for_mobile=1`, { credentials: 'include' });
-      const text = await r.text();
-      let j;
-      try { j = JSON.parse(text); } catch { shelves.push({ type, status, http: r.status, url: r.url, notJson: text.slice(0, 80) }); break outer; }
-      const rows = j.interests || [];
-      for (const i of rows) {
-        Object.keys(i).forEach(k => keys.add(k));
-        Object.keys(i.subject || {}).forEach(k => subjectKeys.add(k));
-        if ('is_private' in i) sawPrivateKey = true;
-      }
-      shelves.push({ type, status, http: r.status, code: j.code, total: j.total, page: rows.length, private: rows.filter(i => i.is_private).length });
-      await new Promise(s => setTimeout(s, 2000));
-    }
-  }
-  console.table(shelves);
-  console.log({ ckFound: !!ck, uidCandidates, sawPrivateKey, keys: [...keys], subjectKeys: [...subjectKeys] });
-})();
-```
-
-### 2.2 跨域探针（临时脚本，不进仓库）
+每个书架只取第一页（14 次请求，约 30 秒），都带 `Referer`：`total` 对照个人主页的数字，私密与字段名在全部书架里找。另打印页面上能找到的 uid 候选，供 §3 自动读 uid。
 
 ```js
 // ==UserScript==
@@ -110,36 +72,42 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
   'use strict';
   console.log('豆仓探针：已加载', location.href);
   const UID = 'lzblack';
-  const variants = {
-    noReferer: {},
-    referer: { Referer: 'https://m.douban.com/mine/' },
-    xOverride: { 'X-Override-Referer': 'https://m.douban.com/mine/' },
-  };
-  const get = (url, headers) => new Promise(resolve => GM_xmlhttpRequest({
-    method: 'GET', url, headers, anonymous: false, timeout: 15000,
+  const get = url => new Promise(resolve => GM_xmlhttpRequest({
+    method: 'GET', url, headers: { Referer: 'https://m.douban.com/mine/' }, anonymous: false, timeout: 15000,
     onload: r => resolve(r),
     onerror: e => resolve({ status: 'error', error: String(e && e.error) }),
     ontimeout: () => resolve({ status: 'timeout' }),
     onabort: () => resolve({ status: 'abort' }),
   }));
   GM_registerMenuCommand('豆仓探针', async () => {
-    alert('豆仓探针：开始（点确定后约 10 秒出结果）');
+    alert('豆仓探针：开始（点确定后约 30 秒出结果）');
     const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
-    const url = `https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=book&status=mark&start=0&count=50&ck=${ck}&for_mobile=1`;
-    const results = [];
-    for (const [name, headers] of Object.entries(variants)) {
-      console.log(`豆仓探针：请求 ${name}`);
-      const r = await get(url, headers);
-      let j;
-      try { j = JSON.parse(r.responseText); } catch { j = null; }
-      results.push({
-        name, status: r.status, finalUrl: r.finalUrl, notJson: j ? undefined : String(r.responseText || r.error || '').slice(0, 80),
-        code: j && j.code, msg: j && j.msg, total: j && j.total, page: j && (j.interests || []).length,
-      });
-      await new Promise(s => setTimeout(s, 2000));
+    const uidCandidates = [...new Set([...document.querySelectorAll('a[href*="/people/"]')]
+      .map(a => (a.href.match(/\/people\/([^/?#]+)/) || [])[1]).filter(Boolean))];
+    const shelves = [];
+    const keys = new Set(), subjectKeys = new Set();
+    let sawPrivateKey = false;
+    outer: for (const type of ['book', 'movie', 'music', 'game', 'drama']) {
+      for (const status of type === 'drama' ? ['mark', 'done'] : ['mark', 'doing', 'done']) {
+        console.log(`豆仓探针：${type} ${status}`);
+        const r = await get(`https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=${type}&status=${status}&start=0&count=50&ck=${ck}&for_mobile=1`);
+        let j;
+        try { j = JSON.parse(r.responseText); } catch {
+          shelves.push({ type, status, http: r.status, finalUrl: r.finalUrl, notJson: String(r.responseText || r.error || '').slice(0, 80) });
+          break outer;
+        }
+        const rows = j.interests || [];
+        for (const i of rows) {
+          Object.keys(i).forEach(k => keys.add(k));
+          Object.keys(i.subject || {}).forEach(k => subjectKeys.add(k));
+          if ('is_private' in i) sawPrivateKey = true;
+        }
+        shelves.push({ type, status, http: r.status, code: j.code, msg: j.msg, total: j.total, page: rows.length, private: rows.filter(i => i.is_private).length });
+        await new Promise(s => setTimeout(s, 2000));
+      }
     }
-    console.table(results);
-    console.log({ ckFound: !!ck });
+    console.table(shelves);
+    console.log({ ckFound: !!ck, uidCandidates, sawPrivateKey, keys: [...keys], subjectKeys: [...subjectKeys] });
     alert('豆仓探针：完成，结果在控制台');
   });
 })();
@@ -149,7 +117,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 单文件 IIFE、纯 JS、无构建，照仓库 `CLAUDE.md`；纯逻辑（翻页、停止、行转换）用 `node --test` 测，fixture 用合成数据。中文界面。
 
-- **运行位置：** 首选方案 C：`@match https://www.douban.com/*`，用 `GM_xmlhttpRequest` 跨域请求 Rexxar（`@connect m.douban.com`），每个请求带 `Referer: https://m.douban.com/mine/`（不带返回 400，见 §2.2 结果）。§2.2 不成立则退回方案 B：同时 `@match https://m.douban.com/mine/*`，www 上的命令打开 `https://m.douban.com/mine/#douban-archive`，m 站脚本见到这个标记才开始导出，在那里同源 `fetch`
+- **运行位置：** 首选方案 C：`@match https://www.douban.com/*`，用 `GM_xmlhttpRequest` 跨域请求 Rexxar（`@connect m.douban.com`），每个请求带 `Referer: https://m.douban.com/mine/`（不带返回 400，见 §2 第 1 条结果）。§2 第 1 条不成立则退回方案 B：同时 `@match https://m.douban.com/mine/*`，www 上的命令打开 `https://m.douban.com/mine/#douban-archive`，m 站脚本见到这个标记才开始导出，在那里同源 `fetch`
 - **触发：** 菜单命令"导出全部标记"，只手动，不自动运行（方案 B 的 hash 标记只来自这个命令）
 - **uid：** 从页面或接口读出当前登录用户，不让用户填；读不到就提示并停止
 - **范围：** 书、影、音、游戏、舞台剧 × 想 / 在 / 过（舞台剧没有"在"），按请求的 `count` 翻页，不按返回条数（私密条目可能让页变短）
@@ -196,7 +164,7 @@ v2 另有两项候选：封面 ZIP（byJming 已有）；Letterboxd（电影）�
 
 ## 6. 构建顺序
 
-1. 跑 §2.1 与 §2.2，结果写回 §2；§2.1 不成立则停，§2.2 不成立则按方案 B
+1. 跑 §2.1 的探针，结果写回 §2；第 1 条不成立则按方案 B，2–4 不成立则停
 2. 翻页、停止规则、暂停续跑、JSON 导出（测试覆盖翻页、`code` 停止、安全验证暂停与续跑、取消）
 3. xlsx 导出（测试覆盖行转换；用真实导出验收 §4）
 4. README、`GREASYFORK-DESCRIPTION.md`、仓库 `CLAUDE.md` 与 `README.md` 的脚本表，发布 Greasy Fork
