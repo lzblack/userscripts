@@ -44,6 +44,12 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 任何一条不成立就回到这里重新设计。
 
+运行位置首选 www（§3 方案 C），所以还要在 Tampermonkey 里临时装 §2.2 的脚本，在已登录的 www.douban.com 页面点菜单"豆仓探针"，确认：
+
+5. www 上 `GM_xmlhttpRequest` 跨域请求 Rexxar 能拿到数据（带 cookie）；记下不设 Referer、设 `Referer`、设 `X-Override-Referer` 三种里哪些成功
+
+5 不成立（三种都失败）就退回方案 B。测完删掉这个临时脚本。
+
 ### 2.1 验证片段
 
 每个书架只取第一页（14 次请求，约 30 秒）：`total` 对照个人主页的数字，私密与字段名在全部书架里找。另打印页面上能找到的 uid 候选，供 §3 自动读 uid。
@@ -78,12 +84,54 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 })();
 ```
 
+### 2.2 跨域探针（临时脚本，不进仓库）
+
+```js
+// ==UserScript==
+// @name         豆仓探针
+// @match        https://www.douban.com/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
+// @connect      m.douban.com
+// ==/UserScript==
+(function () {
+  'use strict';
+  const UID = 'lzblack';
+  const variants = {
+    noReferer: {},
+    referer: { Referer: 'https://m.douban.com/mine/' },
+    xOverride: { 'X-Override-Referer': 'https://m.douban.com/mine/' },
+  };
+  const get = (url, headers) => new Promise(resolve => GM_xmlhttpRequest({
+    method: 'GET', url, headers, anonymous: false,
+    onload: r => resolve(r), onerror: e => resolve({ status: 'error', error: String(e && e.error) }),
+  }));
+  GM_registerMenuCommand('豆仓探针', async () => {
+    const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+    const url = `https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=book&status=mark&start=0&count=50&ck=${ck}&for_mobile=1`;
+    const results = [];
+    for (const [name, headers] of Object.entries(variants)) {
+      const r = await get(url, headers);
+      let j;
+      try { j = JSON.parse(r.responseText); } catch { j = null; }
+      results.push({
+        name, status: r.status, finalUrl: r.finalUrl, notJson: j ? undefined : String(r.responseText || r.error || '').slice(0, 80),
+        code: j && j.code, msg: j && j.msg, total: j && j.total, page: j && (j.interests || []).length,
+      });
+      await new Promise(s => setTimeout(s, 2000));
+    }
+    console.table(results);
+    console.log({ ckFound: !!ck });
+  });
+})();
+```
+
 ## 3. 脚本
 
 单文件 IIFE、纯 JS、无构建，照仓库 `CLAUDE.md`；纯逻辑（翻页、停止、行转换）用 `node --test` 测，fixture 用合成数据。中文界面。
 
-- **运行位置：** `@match https://m.douban.com/mine/*`，同源请求，不需要 `@connect` 和 `GM_xmlhttpRequest`
-- **触发：** 菜单命令"导出全部标记"，只手动，不自动运行
+- **运行位置：** 首选方案 C：`@match https://www.douban.com/*`，用 `GM_xmlhttpRequest` 跨域请求 Rexxar（`@connect m.douban.com`），按 §2.2 的结果决定带哪个 Referer 头。§2.2 不成立则退回方案 B：同时 `@match https://m.douban.com/mine/*`，www 上的命令打开 `https://m.douban.com/mine/#douban-archive`，m 站脚本见到这个标记才开始导出，在那里同源 `fetch`
+- **触发：** 菜单命令"导出全部标记"，只手动，不自动运行（方案 B 的 hash 标记只来自这个命令）
 - **uid：** 从页面或接口读出当前登录用户，不让用户填；读不到就提示并停止
 - **范围：** 书、影、音、游戏、舞台剧 × 想 / 在 / 过（舞台剧没有"在"），按请求的 `count` 翻页，不按返回条数（私密条目可能让页变短）
 - **节奏与风控：** 用的是用户自己的登录账号。串行，每次请求间隔 2 秒（约 10000 条标记约 200 次请求、7 分钟），不重试
@@ -129,7 +177,7 @@ v2 另有两项候选：封面 ZIP（byJming 已有）；Letterboxd（电影）�
 
 ## 6. 构建顺序
 
-1. 跑 §2.1，结果写回 §2；不成立则停
+1. 跑 §2.1 与 §2.2，结果写回 §2；§2.1 不成立则停，§2.2 不成立则按方案 B
 2. 翻页、停止规则、暂停续跑、JSON 导出（测试覆盖翻页、`code` 停止、安全验证暂停与续跑、取消）
 3. xlsx 导出（测试覆盖行转换；用真实导出验收 §4）
 4. README、`GREASYFORK-DESCRIPTION.md`、仓库 `CLAUDE.md` 与 `README.md` 的脚本表，发布 Greasy Fork
