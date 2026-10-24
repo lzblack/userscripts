@@ -2,9 +2,9 @@
 // @name         豆仓：豆瓣书影音标记与个人内容备份（含私密）
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.1.1
+// @version      0.2.0
 // @author       lzblack
-// @description  在已登录的豆瓣页面导出自己全部的书、影、音、游戏、舞台剧标记（含私密），下载为 JSON。只在本机处理，不联系豆瓣以外的任何地址
+// @description  在已登录的豆瓣页面导出自己全部的书、影、音、游戏、舞台剧标记（含私密），下载为 JSON 与 NeoDB CSV。只在本机处理，不联系豆瓣以外的任何地址
 // @match        https://www.douban.com/*
 // @noframes
 // @icon         https://img3.doubanio.com/favicon.ico
@@ -24,7 +24,7 @@
 
   // ============ 常量 ============
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.2.0';
 
   const TYPES = ['book', 'movie', 'music', 'game', 'drama'];
   // 舞台剧没有"在看"
@@ -214,12 +214,146 @@
     return `douban-archive-${uid}-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.json`;
   }
 
+  // ============ NeoDB CSV（§4） ============
+
+  // 表头照 NeoDB 导出（journal/exporters/csv.py），visibility 是给计划中的 NeoDB PR 加的
+  const NEODB_HEADER = ['title', 'info', 'links', 'timestamp', 'status', 'rating', 'comment', 'tags', 'visibility'];
+  const NEODB_STATUS = { mark: 'wishlist', doing: 'progress', done: 'complete' };
+  // 按条目类型分文件，不按书架：电影书架里有剧集（tv）
+  const NEODB_CATEGORIES = { book: 'book', movie: 'movie', tv: 'tv', music: 'music', game: 'game', drama: 'performance' };
+  // NeoDB 的可见性：0 公开、1 仅关注者、2 仅自己
+  const NEODB_PRIVATE = '2';
+
+  function neodbCategory(subjectType) {
+    return Object.prototype.hasOwnProperty.call(NEODB_CATEGORIES, subjectType) ? NEODB_CATEGORIES[subjectType] : null;
+  }
+
+  /** create_time 是北京时间；NeoDB 把没有时区的时间当 UTC */
+  function beijingToIso(s) {
+    const m = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)$/.exec(s || '');
+    return m ? `${m[1]}T${m[2]}+08:00` : '';
+  }
+
+  function neodbMarkRow(interest, status) {
+    const subject = interest.subject || {};
+    const rating = interest.rating && interest.rating.value ? String(interest.rating.value * 2) : '';
+    return [
+      subject.title || '',
+      '',
+      subject.url || '',
+      beijingToIso(interest.create_time),
+      NEODB_STATUS[status],
+      rating,
+      interest.comment || '',
+      (interest.tags || []).map((t) => String(t).replace(/\|/g, ' ')).join('|'),
+      interest.is_private ? NEODB_PRIVATE : '',
+    ];
+  }
+
+  function csvLine(fields) {
+    return fields.map((f) => (/[",\r\n]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f)).join(',') + '\r\n';
+  }
+
+  /** { 'movie_mark.csv': 文本, … }，只含有条目的类别 */
+  function buildNeodbCsvFiles(data) {
+    const files = {};
+    for (const [, byStatus] of Object.entries(data.interests)) {
+      for (const [status, list] of Object.entries(byStatus)) {
+        for (const it of list) {
+          const category = neodbCategory(it.subject && it.subject.type);
+          if (!category) continue;
+          const name = `${category}_mark.csv`;
+          if (!files[name]) files[name] = csvLine(NEODB_HEADER);
+          files[name] += csvLine(neodbMarkRow(it, status));
+        }
+      }
+    }
+    return files;
+  }
+
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  /** 不压缩（store）的 zip：文件只有几 MB，省掉压缩库 */
+  function buildZip(files, date) {
+    const enc = new TextEncoder();
+    const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
+    const dosDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    const chunks = [];
+    const central = [];
+    let offset = 0;
+    for (const [name, text] of Object.entries(files)) {
+      const nameBytes = enc.encode(name);
+      const data = enc.encode(text);
+      const crc = crc32(data);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, 0x0800, true); // 文件名是 UTF-8
+      local.setUint16(8, 0, true);
+      local.setUint16(10, dosTime, true);
+      local.setUint16(12, dosDate, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, data.length, true);
+      local.setUint32(22, data.length, true);
+      local.setUint16(26, nameBytes.length, true);
+      local.setUint16(28, 0, true);
+      chunks.push(new Uint8Array(local.buffer), nameBytes, data);
+
+      const cd = new DataView(new ArrayBuffer(46));
+      cd.setUint32(0, 0x02014b50, true);
+      cd.setUint16(4, 20, true);
+      cd.setUint16(6, 20, true);
+      cd.setUint16(8, 0x0800, true);
+      cd.setUint16(10, 0, true);
+      cd.setUint16(12, dosTime, true);
+      cd.setUint16(14, dosDate, true);
+      cd.setUint32(16, crc, true);
+      cd.setUint32(20, data.length, true);
+      cd.setUint32(24, data.length, true);
+      cd.setUint16(28, nameBytes.length, true);
+      cd.setUint32(42, offset, true);
+      central.push(new Uint8Array(cd.buffer), nameBytes);
+      offset += 30 + nameBytes.length + data.length;
+    }
+    const cdSize = central.reduce((n, c) => n + c.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, Object.keys(files).length, true);
+    end.setUint16(10, Object.keys(files).length, true);
+    end.setUint32(12, cdSize, true);
+    end.setUint32(16, offset, true);
+    const parts = [...chunks, ...central, new Uint8Array(end.buffer)];
+    const out = new Uint8Array(parts.reduce((n, c) => n + c.length, 0));
+    let p = 0;
+    for (const c of parts) { out.set(c, p); p += c.length; }
+    return out;
+  }
+
+  function neodbZipFilename(uid, date) {
+    return exportFilename(uid, date).replace(/\.json$/, '-neodb.zip');
+  }
+
   // ── node 测试导出（在任何 GM_/DOM 调用之前 return） ──────────────────────
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       SHELVES, PAGE_SIZE, MAX_REFETCH, INTERVAL_MS, PROGRESS_TTL_MS,
       interestsUrl, parseUsernameFromUrl, classifyResponse,
       createProgress, isProgressFresh, pageKey, runExport, buildExport, exportFilename,
+      NEODB_HEADER, neodbCategory, beijingToIso, neodbMarkRow, csvLine, buildNeodbCsvFiles, buildZip, neodbZipFilename,
     };
     return;
   }
@@ -301,16 +435,22 @@
 
   const shelfLabel = (shelf) => SHELF_LABELS[shelf.type][shelf.status];
 
-  function download(progress) {
-    const data = buildExport(progress, io.getValue, { now: Date.now(), version: VERSION });
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  function saveFile(content, type, filename) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = exportFilename(progress.uid, new Date());
+    a.href = URL.createObjectURL(new Blob([content], { type }));
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+
+  // JSON 是完整存档，NeoDB zip 只为导入 NeoDB；分两个文件
+  function download(progress) {
+    const now = new Date();
+    const data = buildExport(progress, io.getValue, { now: now.getTime(), version: VERSION });
+    saveFile(JSON.stringify(data), 'application/json', exportFilename(progress.uid, now));
+    saveFile(buildZip(buildNeodbCsvFiles(data), now), 'application/zip', neodbZipFilename(progress.uid, now));
     return data;
   }
 
@@ -361,7 +501,8 @@
       [['继续', () => run(io.getValue(PROGRESS_KEY))], ['放弃', abandon]]);
     } else {
       const data = download(progress);
-      showPanel(`${summarize(data)}\n文件确认保存后点"完成"清除浏览器里的缓存。`,
+      showPanel(`${summarize(data)}\n已下载两个文件：.json 是完整存档，-neodb.zip 用于导入 NeoDB`
+        + '（NeoDB 导入时整批选可见性，选"公开"会把私密标记也公开）。\n文件确认保存后点"完成"清除浏览器里的缓存。',
         [['再下载一次', () => download(io.getValue(PROGRESS_KEY))], ['完成', () => { clearStorage(); hidePanel(); }]]);
     }
   }

@@ -6,7 +6,9 @@ const {
   SHELVES, PAGE_SIZE, MAX_REFETCH, INTERVAL_MS, PROGRESS_TTL_MS,
   interestsUrl, parseUsernameFromUrl, classifyResponse,
   createProgress, isProgressFresh, pageKey, runExport, buildExport, exportFilename,
+  NEODB_HEADER, neodbCategory, beijingToIso, neodbMarkRow, csvLine, buildNeodbCsvFiles, buildZip, neodbZipFilename,
 } = require('./douban-archive.user.js');
+const zlib = require('node:zlib');
 
 // ── 合成数据 ──────────────────────────────────────────────────────────────
 
@@ -319,4 +321,115 @@ test('isProgressFresh: 24 小时内有效', () => {
 
 test('exportFilename: douban-archive-<uid>-<本地日期>.json', () => {
   assert.equal(exportFilename('lzblack', new Date(2026, 9, 3, 23, 59)), 'douban-archive-lzblack-2026-10-03.json');
+});
+
+// ── NeoDB CSV ────────────────────────────────────────────────────────────
+
+const interest = (over = {}) => ({
+  id: '1', status: 'done', create_time: '2026-10-21 00:04:50', comment: '好看', tags: ['科幻', '2020'],
+  rating: { count: 1, max: 5, star_count: 4, value: 4 }, is_private: false,
+  subject: { type: 'movie', title: '星际穿越', url: 'https://movie.douban.com/subject/1889243/' },
+  ...over,
+});
+
+test('NEODB_HEADER: 照 NeoDB 导出的 8 列，另加 visibility', () => {
+  assert.deepEqual(NEODB_HEADER, ['title', 'info', 'links', 'timestamp', 'status', 'rating', 'comment', 'tags', 'visibility']);
+});
+
+test('neodbCategory: 按 subject.type，舞台剧对应 performance，未知类型为 null', () => {
+  assert.equal(neodbCategory('movie'), 'movie');
+  assert.equal(neodbCategory('tv'), 'tv');
+  assert.equal(neodbCategory('book'), 'book');
+  assert.equal(neodbCategory('music'), 'music');
+  assert.equal(neodbCategory('game'), 'game');
+  assert.equal(neodbCategory('drama'), 'performance');
+  assert.equal(neodbCategory('podcast'), null);
+  assert.equal(neodbCategory(undefined), null);
+});
+
+test('beijingToIso: 北京时间补上 +08:00；格式不对时为空', () => {
+  assert.equal(beijingToIso('2026-10-21 00:04:50'), '2026-10-21T00:04:50+08:00');
+  assert.equal(beijingToIso(''), '');
+  assert.equal(beijingToIso(undefined), '');
+  assert.equal(beijingToIso('2026/10/21'), '');
+});
+
+test('neodbMarkRow: 各列映射', () => {
+  assert.deepEqual(neodbMarkRow(interest(), 'done'), [
+    '星际穿越', '', 'https://movie.douban.com/subject/1889243/', '2026-10-21T00:04:50+08:00',
+    'complete', '8', '好看', '科幻|2020', '',
+  ]);
+});
+
+test('neodbMarkRow: 想 / 在 → wishlist / progress；无评分留空；私密 visibility 为 2', () => {
+  const r1 = neodbMarkRow(interest({ rating: null, is_private: true }), 'mark');
+  assert.deepEqual([r1[4], r1[5], r1[8]], ['wishlist', '', '2']);
+  assert.equal(neodbMarkRow(interest(), 'doing')[4], 'progress');
+});
+
+test('neodbMarkRow: 标签里的 | 换成空格，空标签与缺字段不出错', () => {
+  const r = neodbMarkRow(interest({ tags: ['a|b', 'c'], comment: undefined }), 'done');
+  assert.deepEqual([r[6], r[7]], ['', 'a b|c']);
+  assert.equal(neodbMarkRow(interest({ tags: undefined }), 'done')[7], '');
+});
+
+test('csvLine: 含逗号、引号、换行的字段加引号，引号加倍，行尾 CRLF', () => {
+  assert.equal(csvLine(['a', 'b,c', 'say "hi"', 'x\ny', '']), 'a,"b,c","say ""hi""","x\ny",\r\n');
+});
+
+test('buildNeodbCsvFiles: 按条目类型分文件，电影书架里的剧集进 tv_mark.csv', () => {
+  const data = { interests: {
+    movie: { mark: [interest({ id: '1', subject: { type: 'tv', title: 'T', url: 'u1' } })], done: [interest({ id: '2' })] },
+    drama: { done: [interest({ id: '3', subject: { type: 'drama', title: 'D', url: 'u3' } })] },
+    book: { mark: [] },
+  } };
+  const files = buildNeodbCsvFiles(data);
+  assert.deepEqual(Object.keys(files).sort(), ['movie_mark.csv', 'performance_mark.csv', 'tv_mark.csv']);
+  const tvLines = files['tv_mark.csv'].split('\r\n');
+  assert.equal(tvLines[0], NEODB_HEADER.join(','));
+  assert.ok(tvLines[1].startsWith('T,,u1,'));
+  assert.ok(tvLines[1].includes(',wishlist,'));
+});
+
+test('buildNeodbCsvFiles: 未知类型的条目跳过', () => {
+  const data = { interests: { movie: { done: [interest({ subject: { type: 'podcast', title: 'P', url: 'u' } })] } } };
+  assert.deepEqual(Object.keys(buildNeodbCsvFiles(data)), []);
+});
+
+// 按 zip 规范读回：中央目录、本地文件头、CRC、存储方式
+function readZip(bytes) {
+  const buf = Buffer.from(bytes);
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(eocd >= 0, '有中央目录结束记录');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = {};
+  for (let i = 0; i < count; i++) {
+    assert.equal(buf.readUInt32LE(p), 0x02014b50);
+    const method = buf.readUInt16LE(p + 10);
+    const crc = buf.readUInt32LE(p + 16);
+    const size = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    assert.equal(buf.readUInt32LE(local), 0x04034b50);
+    const dataStart = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(dataStart, dataStart + size);
+    assert.equal(method, 0, 'store');
+    assert.equal(zlib.crc32(data) >>> 0, crc, `${name} CRC`);
+    out[name] = data.toString('utf8');
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+test('buildZip: 不压缩的 zip，CRC 正确，内容可读回（含中文）', () => {
+  const files = { 'movie_mark.csv': 'title\r\n星际穿越\r\n', 'book_mark.csv': '' };
+  assert.deepEqual(readZip(buildZip(files, new Date(2026, 9, 23, 12, 30, 10))), files);
+});
+
+test('neodbZipFilename', () => {
+  assert.equal(neodbZipFilename('lzblack', new Date(2026, 9, 3)), 'douban-archive-lzblack-2026-10-03-neodb.zip');
 });
