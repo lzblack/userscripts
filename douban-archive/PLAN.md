@@ -96,6 +96,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 // ==/UserScript==
 (function () {
   'use strict';
+  console.log('豆仓探针：已加载', location.href);
   const UID = 'lzblack';
   const variants = {
     noReferer: {},
@@ -110,7 +111,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     onabort: () => resolve({ status: 'abort' }),
   }));
   GM_registerMenuCommand('豆仓探针', async () => {
-    console.log('豆仓探针：开始');
+    alert('豆仓探针：开始（点确定后约 10 秒出结果）');
     const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
     const url = `https://m.douban.com/rexxar/api/v2/user/${UID}/interests?type=book&status=mark&start=0&count=50&ck=${ck}&for_mobile=1`;
     const results = [];
