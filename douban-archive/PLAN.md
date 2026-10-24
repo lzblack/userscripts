@@ -379,4 +379,4 @@ Greasy Fork 规则（2026-10-23 核对 code-rules、external-scripts、cdns）�
 - [x] 范围与路线（§5.1，2026-10-23）
 - [x] 名字（2026-10-23）：豆仓，英文 Douban Archive，目录 `douban-archive`；Greasy Fork 标题"豆仓：豆瓣书影音标记与个人内容备份（含私密）"；v1 先用"豆仓：豆瓣书影音标记备份（含私密）"（2026-10-24 定：个人内容是 v2 才有，免得名不副实）；v2 删除后名字固定为后者
 - [ ] NeoDB 逐条可见性：不必提 PR。NeoDB 的 NDJSON 导入已逐条读 `visibility`（`journal/importers/ndjson.py`，2026-10-24 读源码），豆备就是这么做的；改出 NDJSON 要同时写 `catalog.ndjson`，工作量待估
-- [ ] 播客：`type=podcast` 是认识的类型，但没有有播客标记的账号可验证（§2.3）
+- [x] 播客（2026-10-24）：不做。该账号标过播客，带 `ck` 时 `type=podcast` 三个状态仍都是 0，不带 `type` 的列表最新几条里也没有播客，说明播客标记不在 Rexxar `interests` 里；另找接口不值得
