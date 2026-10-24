@@ -17,6 +17,8 @@
 // @connect      m.douban.com
 // @supportURL   https://github.com/lzblack/userscripts/issues
 // @license      MIT
+// @updateURL    https://raw.githubusercontent.com/lzblack/userscripts/main/douban-archive/douban-archive.user.js
+// @downloadURL  https://raw.githubusercontent.com/lzblack/userscripts/main/douban-archive/douban-archive.user.js
 // ==/UserScript==
 
 (function () {
