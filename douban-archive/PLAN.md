@@ -169,6 +169,23 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
     console.table(shelves);
     alert('豆仓探针：电影翻到底完成，结果在控制台');
   });
+  // 第 3 条快测：新加的私密标记在想看第一页
+  GM_registerMenuCommand('豆仓探针：想看第一页', async () => {
+    const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
+    let numericId;
+    try { numericId = JSON.parse((await get(`https://m.douban.com/rexxar/api/v2/user/${UID}?ck=${ck}&for_mobile=1`)).responseText).id; } catch { /* 下面停止 */ }
+    if (!numericId) { alert('豆仓探针：读不到数字 id'); return; }
+    await new Promise(s => setTimeout(s, 2000));
+    const r = await get(`https://m.douban.com/rexxar/api/v2/user/${numericId}/interests?type=movie&status=mark&start=0&count=50&ck=${ck}&for_mobile=1`);
+    let j;
+    try { j = JSON.parse(r.responseText); } catch { alert(`豆仓探针：不是 JSON，http ${r.status}`); return; }
+    const rows = j.interests || [];
+    const result = { http: r.status, code: j.code, total: j.total, page: rows.length,
+      private: rows.filter(i => i.is_private).length,
+      privateSubjectIds: rows.filter(i => i.is_private).map(i => i.subject && i.subject.id) };
+    console.log(result);
+    alert(`豆仓探针：${JSON.stringify(result)}`);
+  });
   // §2.2：同一页（想看 start=300）比较用户名与数字 id，看是不是本人视角
   GM_registerMenuCommand('豆仓探针：身份', async () => {
     alert('豆仓探针：开始查身份（约 10 秒，完成时会再弹窗）');
