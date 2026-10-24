@@ -50,6 +50,18 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 5 不成立（三种都失败）就退回方案 B。测完删掉这个临时脚本。
 
+**§2.2 结果（2026-10-23，Firefox + Tampermonkey，www 首页，`type=book&status=mark`）：** 成立，用方案 C。
+
+| 请求头 | 结果 |
+| --- | --- |
+| 不设 | 400，`code: 1287`，`msg: invalid_request_1284` |
+| `Referer: https://m.douban.com/mine/` | 200，`total: 2001`，本页 50 条 |
+| `X-Override-Referer: https://m.douban.com/mine/` | 400，同上 |
+
+- Rexxar 校验 Referer；Tampermonkey 的 `GM_xmlhttpRequest` 能设 `Referer`。`X-Override-Referer` 是豆伴扩展内部改写 Referer 用的，豆瓣不认
+- 跨子域请求带上了登录 cookie（拿到 200 和数据）；`ck` 能从 www 的 `document.cookie` 读到
+- uid 用用户名（`lzblack`）即可，不必是数字 id
+
 ### 2.1 验证片段
 
 每个书架只取第一页（14 次请求，约 30 秒）：`total` 对照个人主页的数字，私密与字段名在全部书架里找。另打印页面上能找到的 uid 候选，供 §3 自动读 uid。
@@ -137,7 +149,7 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 单文件 IIFE、纯 JS、无构建，照仓库 `CLAUDE.md`；纯逻辑（翻页、停止、行转换）用 `node --test` 测，fixture 用合成数据。中文界面。
 
-- **运行位置：** 首选方案 C：`@match https://www.douban.com/*`，用 `GM_xmlhttpRequest` 跨域请求 Rexxar（`@connect m.douban.com`），按 §2.2 的结果决定带哪个 Referer 头。§2.2 不成立则退回方案 B：同时 `@match https://m.douban.com/mine/*`，www 上的命令打开 `https://m.douban.com/mine/#douban-archive`，m 站脚本见到这个标记才开始导出，在那里同源 `fetch`
+- **运行位置：** 首选方案 C：`@match https://www.douban.com/*`，用 `GM_xmlhttpRequest` 跨域请求 Rexxar（`@connect m.douban.com`），每个请求带 `Referer: https://m.douban.com/mine/`（不带返回 400，见 §2.2 结果）。§2.2 不成立则退回方案 B：同时 `@match https://m.douban.com/mine/*`，www 上的命令打开 `https://m.douban.com/mine/#douban-archive`，m 站脚本见到这个标记才开始导出，在那里同源 `fetch`
 - **触发：** 菜单命令"导出全部标记"，只手动，不自动运行（方案 B 的 hash 标记只来自这个命令）
 - **uid：** 从页面或接口读出当前登录用户，不让用户填；读不到就提示并停止
 - **范围：** 书、影、音、游戏、舞台剧 × 想 / 在 / 过（舞台剧没有"在"），按请求的 `count` 翻页，不按返回条数（私密条目可能让页变短）
