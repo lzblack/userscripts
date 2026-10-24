@@ -1,6 +1,6 @@
 # 豆仓（Douban Archive）：计划
 
-Status: v0.4，2026-10-23 第 2 步完成（JSON 导出实跑通过，见 §2 末）；下一步 §6 第 3 步。
+Status: v0.5，2026-10-23 第 3 步完成（NeoDB CSV，§4 验收除真实导入外通过）；下一步 §6 第 4 步。
 
 ## 1. 目标
 
@@ -317,6 +317,8 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 - **NeoDB PR（第 3 步验收后再提）：** CSV 导入器读可选的 `visibility` 列，逐条设可见性，缺省沿用整批设置
 
 验收：按 NeoDB `CsvImporter` 的读法（`validate_file` 的成员名检查、`csv.DictReader`、`parse_shelf_type`、`parse_tags`、`parse_datetime`、`int(float(rating))`）用 Python 解析真实导出的 zip，各类条数之和与 JSON 一致、每行字段解析成功；能的话在 NeoDB 上真实导入一次（选"仅自己"）。
+
+**验收结果（2026-10-23，v0.2.0 的生成函数跑 2026-10-23 的真实 JSON）：** zip 1.1 MB，6 个成员（book 3292、movie 3359、tv 947、music 1000、game 677、performance 29），`zipfile.testzip()` 通过；按上面的读法 9304 行全部解析成功，与 JSON 条数一致，评分 3753 条都在 2–10，时间都带时区，私密 6 条 `visibility` 为 2；标题、短评（含 3 条带换行的）、标签按"链接 + 状态"逐条比对 9304 条全部原样读回。未做：在 NeoDB 上真实导入。
 
 Greasy Fork 规则（2026-10-23 核对 code-rules、external-scripts、cdns）：代码不得混淆或压缩；本脚本无外部库。不发数据给作者，不涉及 `@antifeature`。
 
