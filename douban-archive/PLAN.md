@@ -46,22 +46,35 @@ https://m.douban.com/rexxar/api/v2/user/{uid}/interests?type={type}&status={stat
 
 ### 2.1 验证片段
 
+每个书架只取第一页（14 次请求，约 30 秒）：`total` 对照个人主页的数字，私密与字段名在全部书架里找。另打印页面上能找到的 uid 候选，供 §3 自动读 uid。
+
 ```js
 (async () => {
-  const UID = '填你的豆瓣 id';
+  const UID = 'lzblack';
   const ck = (document.cookie.match(/(?:^|; )ck=([^;]+)/) || [])[1];
-  let n = 0, priv = 0, total, keys, subjectKeys, code;
-  for (let start = 0; start < 500; start += 50) {
-    const r = await fetch(`/rexxar/api/v2/user/${UID}/interests?type=book&status=mark&start=${start}&count=50&ck=${ck}&for_mobile=1`, { credentials: 'include' });
-    const j = await r.json();
-    if (r.status !== 200 || j.code) { code = [r.status, j.code, j.msg]; break; }
-    const rows = j.interests || [];
-    total = j.total; n += rows.length; priv += rows.filter(i => i.is_private).length;
-    if (rows[0]) { keys = Object.keys(rows[0]); subjectKeys = Object.keys(rows[0].subject || {}); }
-    if (rows.length < 50) break;
-    await new Promise(s => setTimeout(s, 2000));
+  const uidCandidates = [...new Set([...document.querySelectorAll('a[href*="/people/"]')]
+    .map(a => (a.href.match(/\/people\/([^/?#]+)/) || [])[1]).filter(Boolean))];
+  const shelves = [];
+  const keys = new Set(), subjectKeys = new Set();
+  let sawPrivateKey = false;
+  outer: for (const type of ['book', 'movie', 'music', 'game', 'drama']) {
+    for (const status of type === 'drama' ? ['mark', 'done'] : ['mark', 'doing', 'done']) {
+      const r = await fetch(`/rexxar/api/v2/user/${UID}/interests?type=${type}&status=${status}&start=0&count=50&ck=${ck}&for_mobile=1`, { credentials: 'include' });
+      const text = await r.text();
+      let j;
+      try { j = JSON.parse(text); } catch { shelves.push({ type, status, http: r.status, url: r.url, notJson: text.slice(0, 80) }); break outer; }
+      const rows = j.interests || [];
+      for (const i of rows) {
+        Object.keys(i).forEach(k => keys.add(k));
+        Object.keys(i.subject || {}).forEach(k => subjectKeys.add(k));
+        if ('is_private' in i) sawPrivateKey = true;
+      }
+      shelves.push({ type, status, http: r.status, code: j.code, total: j.total, page: rows.length, private: rows.filter(i => i.is_private).length });
+      await new Promise(s => setTimeout(s, 2000));
+    }
   }
-  console.log({ ckFound: !!ck, code, total, fetched: n, private: priv, keys, subjectKeys });
+  console.table(shelves);
+  console.log({ ckFound: !!ck, uidCandidates, sawPrivateKey, keys: [...keys], subjectKeys: [...subjectKeys] });
 })();
 ```
 
