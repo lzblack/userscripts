@@ -125,3 +125,4 @@
 - [豆瓣广播标记助手](https://greasyfork.org/zh-CN/scripts/572857) — 在首页广播流中显示你的书影音游标记状态和评分
 - [豆瓣一键添书](https://greasyfork.org/zh-CN/scripts/582130) — 在 Amazon 图书页一键把书加进豆瓣（查重 + 自动回填 + 封面）
 - [豆瓣一键添游戏](https://greasyfork.org/zh-CN/scripts/591798) — 在 Steam 商店页一键把游戏加进豆瓣（查重 + 自动回填 + 封面）
+- [豆仓：豆瓣书影音标记备份](https://greasyfork.org/zh-CN/scripts/602023) — 一次导出全部书影音游戏舞台剧标记（含私密），可导入 NeoDB
