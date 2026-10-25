@@ -344,7 +344,7 @@ v0.3.0 照豆伴用不带 `type` 的 `interests?count=1` 取总数，开始卡�
 
 **验收结果（2026-10-23，v0.2.0 的生成函数跑 2026-10-23 的真实 JSON）：** zip 1.1 MB，6 个成员（book 3292、movie 3359、tv 947、music 1000、game 677、performance 29），`zipfile.testzip()` 通过；按上面的读法 9304 行全部解析成功，与 JSON 条数一致，评分 3753 条都在 2–10，时间都带时区，私密 6 条 `visibility` 为 2；标题、短评（含 3 条带换行的）、标签按"链接 + 状态"逐条比对 9304 条全部原样读回。
 
-**NeoDB 真实导入（2026-10-24，neodb.social，同一份 9304 条的 zip，"导入 NeoDB 备份"页）：** 9297 导入、2 跳过、5 失败，合计 9304，与 JSON 一致。失败是 NeoDB 抓不到条目（`Could not find item: https://movie.douban.com/subject/24527478/`，一部可能已被豆瓣屏蔽的剧集），不是格式问题。导入是服务端后台任务，可以关页面；约 2.5 小时（每条要先在 NeoDB 条目库里找或去豆瓣抓）。导出 JSON 的 `subject.is_show` 9304 条里 9248 条为 false，不能用来预判失败。私密条目的可见性与评分换算待在 NeoDB 页面上核对。
+**NeoDB 真实导入（2026-10-24，neodb.social，同一份 9304 条的 zip，"导入 NeoDB 备份"页）：** 9297 导入、2 跳过、5 失败，合计 9304，与 JSON 一致。5 条失败都是 NeoDB 抓不到条目（`Could not find item`），不是格式问题：4 条在导出里标题就是"未知图书""未知游戏"（豆瓣已删的条目，Rexxar 返回占位标题），1 条是剧集《中国，新的崛起》（24527478，带评分与短评，多半被屏蔽）。这几条只存在于 JSON 里。导入是服务端后台任务，可以关页面；约 2.5 小时（每条要先在 NeoDB 条目库里找或去豆瓣抓）。导出 JSON 的 `subject.is_show` 9304 条里 9248 条为 false，不能用来预判失败。私密条目的可见性与评分换算待在 NeoDB 页面上核对。
 
 Greasy Fork 规则（2026-10-23 核对 code-rules、external-scripts、cdns）：代码不得混淆或压缩；本脚本无外部库。不发数据给作者，不涉及 `@antifeature`。
 
