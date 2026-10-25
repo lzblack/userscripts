@@ -6,7 +6,7 @@
 
 ## 状态
 
-v0.3.1。在 Firefox + Tampermonkey 上对一个 9304 条（含 6 条私密）的账号完整跑通两次，14 个书架条数全部与 `total` 一致。NeoDB CSV 按 NeoDB `CsvImporter` 的读法解析通过，尚未在 NeoDB 上真实导入。暂停后续跑、安全验证只有单元测试，没在真实环境触发过。
+v0.3.1。在 Firefox + Tampermonkey 上对一个 9304 条（含 6 条私密）的账号完整跑通两次，14 个书架条数全部与 `total` 一致。NeoDB CSV 在 neodb.social 真实导入一次：9304 条中 9297 导入、2 跳过、5 失败（NeoDB 抓不到的豆瓣条目）。暂停后续跑、安全验证只有单元测试，没在真实环境触发过。
 
 ## 使用
 
