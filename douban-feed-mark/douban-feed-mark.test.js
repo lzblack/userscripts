@@ -9,6 +9,7 @@ const {
   cacheKey,
   interestUrl,
   parseIlmenInterest,
+  classifyInterestResponse,
 } = require('./douban-feed-mark.user.js');
 
 // .abstract 的最小替身：getCategoryFromItem 只读 querySelector('.abstract').textContent
@@ -107,13 +108,6 @@ test('parseIlmenInterest: 两个条件缺一不可，避免整页误盖印章', 
   assert.equal(parseIlmenInterest({ r: 0, action: null, is_modify: true }).status, null);
 });
 
-test('parseIlmenInterest: r 非 0 是错误响应（未登录时是 r:1 code:403）', () => {
-  assert.deepEqual(
-    parseIlmenInterest({ r: 1, code: 403 }),
-    { status: null, rating: 0 }
-  );
-});
-
 test('parseIlmenInterest: rating 是 1-5 的数字，只在标记过时才读', () => {
   assert.deepEqual(
     parseIlmenInterest({ r: 0, action: 'collect', is_modify: true, rating: 4 }),
@@ -122,5 +116,86 @@ test('parseIlmenInterest: rating 是 1-5 的数字，只在标记过时才读', 
   assert.equal(parseIlmenInterest({ r: 0, action: null, is_modify: false, rating: 5 }).rating, 0);
 });
 
-// 书影音那条解析（parseSubjectInterest）依赖 DOMParser，node 里没有，
-// 和仓库其他脚本一样只在浏览器里手测；本次也没有改动它的逻辑。
+// ── 响应分类：失败绝不能当成「未标记」──────────────────────────────────────
+// 失败（非 200、验证页/登录页 HTML、字段缺失）不缓存、不渲染，下次 scan 重新请求；
+// 只有 ok 的响应才写缓存。以前失败也被缓存成未标记 24 小时，一次限流整页标记就没了。
+
+const ILMEN_UNMARKED = '{"r": 0, "action": null, "is_modify": false, "rating": null}';
+
+test('classifyInterestResponse: 非 200 一律失败（两个接口）', () => {
+  // 未登录实测（2026-10-30，curl 匿名）：两个接口都是 403 + 这段 JSON
+  const anon = '{"code": 403, "r": 1, "error": "???"}';
+  assert.equal(classifyInterestResponse('game', 403, anon).ok, false);
+  assert.equal(classifyInterestResponse('book', 403, anon).ok, false);
+  assert.equal(classifyInterestResponse('movie', 429, '').ok, false);
+  assert.equal(classifyInterestResponse('game', 500, ILMEN_UNMARKED).ok, false);
+});
+
+test('classifyInterestResponse: 200 但响应体是 HTML（验证页/登录页被跟随重定向）→ 失败', () => {
+  const page = '<!DOCTYPE html><html><head><title>登录豆瓣</title></head><body></body></html>';
+  assert.equal(classifyInterestResponse('book', 200, page).ok, false);
+  assert.equal(classifyInterestResponse('game', 200, page).ok, false);
+  assert.equal(classifyInterestResponse('music', 200, '').ok, false);
+});
+
+test('classifyInterestResponse: 200 + JSON 但不是对象 → 失败', () => {
+  assert.equal(classifyInterestResponse('book', 200, 'null').ok, false);
+  assert.equal(classifyInterestResponse('game', 200, '[]').ok, false);
+  assert.equal(classifyInterestResponse('movie', 200, '"ok"').ok, false);
+});
+
+test('classifyInterestResponse: ilmen 缺字段或 r 非 0 → 失败', () => {
+  assert.equal(classifyInterestResponse('game', 200, '{}').ok, false);
+  // 未登录时 ilmen 返回的就是 r:1 code:403，以前被当成未标记
+  assert.equal(classifyInterestResponse('game', 200, '{"code": 403, "r": 1}').ok, false);
+  assert.equal(classifyInterestResponse('game', 200, '{"r": 0, "is_modify": false}').ok, false);
+  assert.equal(classifyInterestResponse('game', 200, '{"r": 0, "action": null}').ok, false);
+});
+
+test('classifyInterestResponse: ilmen 已登录未标记（真实抓包）→ ok', () => {
+  const result = classifyInterestResponse('game', 200, ILMEN_UNMARKED);
+  assert.equal(result.ok, true);
+  assert.deepEqual(parseIlmenInterest(result.data), { status: null, rating: 0 });
+});
+
+test('classifyInterestResponse: 书影音 JSON 里既没有 html 也没有 interest_status → 失败', () => {
+  assert.equal(classifyInterestResponse('book', 200, '{}').ok, false);
+  assert.equal(classifyInterestResponse('movie', 200, '{"r": 0}').ok, false);
+  assert.equal(classifyInterestResponse('music', 200, '{"code": 403, "r": 1}').ok, false);
+});
+
+test('classifyInterestResponse: 书影音 html 里没有标记表单 → 失败', () => {
+  // 未标记的判断全靠表单里的 interest 单选框；没有表单就无从判断，不能当未标记
+  assert.equal(classifyInterestResponse('book', 200, '{"html": ""}').ok, false);
+  assert.equal(classifyInterestResponse('book', 200, '{"html": "<div>出错了</div>"}').ok, false);
+});
+
+test('classifyInterestResponse: 书影音已登录未标记（真实抓包）→ ok', () => {
+  // book.douban.com/j/subject/38929993/interest，2026-10-30，已登录、未标记：
+  // 200 application/json，没有 interest_status 键，只有 html（三个都没勾的 interest
+  // 单选框 + 空的 #n_rating）和 my_tags/popular_tags/tags。html 删去了样式和分享区，
+  // my_tags 清空。
+  const body = JSON.stringify({
+    my_tags: [],
+    html: '\n<div class="indentpop1 clearfix">\n<form action="https://book.douban.com/j/subject/38929993/interest"\n  method="POST"\n  class="j a_interest_form book-sns">\n'
+      + '    <span class="interest-status">\n'
+      + '      <label><input type="radio" value="wish" name="interest"\n              />&nbsp;想读 </label>\n'
+      + '      <label><input type="radio" value="do" name="interest"\n              />&nbsp;在读 </label>\n'
+      + '      <label><input type="radio" value="collect" name="interest"\n              />&nbsp;读过 </label>\n'
+      + '    </span>\n'
+      + '      <input id="n_rating" type="hidden" value=""\n            name="rating"\n          />\n'
+      + '</form>\n</div>\n',
+    popular_tags: [],
+    tags: [],
+  });
+  const result = classifyInterestResponse('book', 200, body);
+  assert.equal(result.ok, true);
+  assert.equal('interest_status' in result.data, false);
+});
+
+test('classifyInterestResponse: 认不出的类别 → 失败', () => {
+  assert.equal(classifyInterestResponse('podcast', 200, ILMEN_UNMARKED).ok, false);
+});
+
+// 书影音的状态/评分提取（parseSubjectInterest）依赖 DOMParser，node 里没有，
+// 只在浏览器里手测；结构校验在上面的 classifyInterestResponse 里。

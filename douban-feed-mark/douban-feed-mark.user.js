@@ -2,7 +2,7 @@
 // @name         豆瓣广播：这个我标过
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.4.1
+// @version      1.4.2
 // @author       lzblack
 // @description  在豆瓣广播流（首页 + 成员 statuses 页）和豆列页中，显示你对书影音游戏条目的标记状态和评分
 // @match        https://www.douban.com/
@@ -64,7 +64,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       getCategoryFromUrl, getCategoryFromItem, getSubjectId,
-      cacheKey, interestUrl, parseIlmenInterest,
+      cacheKey, interestUrl, parseIlmenInterest, classifyInterestResponse,
     };
     return;
   }
@@ -190,8 +190,8 @@
   // 游戏：www 的 /j/ilmen/thing/{id}/interest，字段完全不同。
   // 实测未标记时 action 为 null、is_modify 为 false；标记过则 action 是
   // wish/do/collect 且 is_modify 为 true。两个条件都要满足才算标过。
+  // 调用前必须先过 classifyInterestResponse：r 非 0（未登录）在那里就判为失败
   function parseIlmenInterest(data) {
-    if (data.r) return { status: null, rating: 0 };
     const status = data.is_modify && data.action ? data.action : null;
     const rating = status ? parseInt(data.rating, 10) || 0 : 0;
     return { status, rating };
@@ -205,9 +205,42 @@
     return host ? `https://${host}/j/subject/${subjectId}/interest` : null;
   }
 
+  // 失败和「确认未标记」必须分开：失败不缓存、不渲染，下次 scan 重新请求。
+  // 验证页/登录页是 HTML（GM_xmlhttpRequest 跟随重定向后照样 200），限流是非 200，
+  // 未登录两个接口都是 403 + {code: 403, r: 1}——这些都不能当成未标记。
+  function classifyInterestResponse(category, httpStatus, responseText) {
+    if (httpStatus !== 200) return { ok: false, reason: `HTTP ${httpStatus}` };
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      return { ok: false, reason: '响应不是 JSON（验证页或登录页？）' };
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return { ok: false, reason: '响应不是 JSON 对象' };
+    }
+    if (category === 'game') {
+      // 已登录未标记实测是 {r: 0, action: null, is_modify: false, rating: null}
+      if (data.r !== 0 || !('action' in data) || !('is_modify' in data)) {
+        return { ok: false, reason: 'ilmen 响应缺少预期字段' };
+      }
+    } else if (CATEGORY_HOSTS[category]) {
+      // 已登录未标记实测（2026-10-30）没有 interest_status 键，只有 html：一个标记表单，
+      // 三个 name="interest" 单选框都没勾。没有这个表单就判断不了标没标，算失败。
+      const hasForm = typeof data.html === 'string' && data.html.includes('name="interest"');
+      if (!hasForm && !('interest_status' in data)) {
+        return { ok: false, reason: '响应里既没有标记表单也没有 interest_status' };
+      }
+    } else {
+      return { ok: false, reason: `未知类别 ${category}` };
+    }
+    return { ok: true, data };
+  }
+
+  // resolve 成 {ok: true, status, rating} 或 {ok: false}
   function fetchInterest(subjectId, category) {
     const url = interestUrl(subjectId, category);
-    if (!url) return Promise.resolve({ status: null, rating: null });
+    if (!url) return Promise.resolve({ ok: false });
 
     return new Promise(function (resolve) {
       GM_xmlhttpRequest({
@@ -215,23 +248,25 @@
         url,
         anonymous: false,
         onload(resp) {
+          const result = classifyInterestResponse(category, resp.status, resp.responseText);
+          if (!result.ok) {
+            log('请求失败:', category, subjectId, result.reason);
+            resolve({ ok: false });
+            return;
+          }
           try {
-            if (resp.status !== 200) {
-              resolve({ status: null, rating: null });
-              return;
-            }
-            const data = JSON.parse(resp.responseText);
-            resolve(category === 'game'
-              ? parseIlmenInterest(data)
-              : parseSubjectInterest(data));
+            const parsed = category === 'game'
+              ? parseIlmenInterest(result.data)
+              : parseSubjectInterest(result.data);
+            resolve({ ok: true, status: parsed.status, rating: parsed.rating });
           } catch (e) {
-            log('解析失败:', subjectId, e);
-            resolve({ status: null, rating: null });
+            log('解析失败:', category, subjectId, e);
+            resolve({ ok: false });
           }
         },
         onerror(e) {
-          log('请求失败:', subjectId, e);
-          resolve({ status: null, rating: null });
+          log('请求失败:', category, subjectId, e);
+          resolve({ ok: false });
         },
       });
     });
@@ -456,6 +491,11 @@
     // 并发请求
     const tasks = toFetch.map((info) => () =>
       fetchInterest(info.id, info.category).then(function (result) {
+        if (!result.ok) {
+          // 不缓存，摘掉 dfmDone 让下一次 scan 重新请求
+          for (const link of info.links) delete link.dataset.dfmDone;
+          return;
+        }
         setCache(info.id, info.category, result.status, result.rating);
         if (result.status) {
           for (const link of info.links) {
