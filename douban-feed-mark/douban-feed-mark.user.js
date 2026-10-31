@@ -205,11 +205,26 @@
     return host ? `https://${host}/j/subject/${subjectId}/interest` : null;
   }
 
+  // 未登录实测（2026-10-30，匿名请求两个接口）：HTTP 403 + {"code": 403, "r": 1, ...}
+  function isLoggedOutBody(responseText) {
+    try {
+      const data = JSON.parse(responseText);
+      return !!data && data.r === 1 && data.code === 403;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // 失败和「确认未标记」必须分开：失败不缓存、不渲染，下次 scan 重新请求。
   // 验证页/登录页是 HTML（GM_xmlhttpRequest 跟随重定向后照样 200），限流是非 200，
   // 未登录两个接口都是 403 + {code: 403, r: 1}——这些都不能当成未标记。
   function classifyInterestResponse(category, httpStatus, responseText) {
-    if (httpStatus !== 200) return { ok: false, reason: `HTTP ${httpStatus}` };
+    if (httpStatus !== 200) {
+      if (httpStatus === 403 && isLoggedOutBody(responseText)) {
+        return { ok: false, loggedOut: true, reason: '未登录' };
+      }
+      return { ok: false, reason: `HTTP ${httpStatus}` };
+    }
     let data;
     try {
       data = JSON.parse(responseText);
@@ -251,7 +266,7 @@
           const result = classifyInterestResponse(category, resp.status, resp.responseText);
           if (!result.ok) {
             log('请求失败:', category, subjectId, result.reason);
-            resolve({ ok: false });
+            resolve({ ok: false, loggedOut: !!result.loggedOut });
             return;
           }
           try {
@@ -445,6 +460,10 @@
     return targets;
   }
 
+  // 只在内存里、只管当前页：未登录时每次 scan 都重试只会换来一串 403。
+  // 不写存储，登录后刷新页面就恢复。
+  let loggedOut = false;
+
   function scan() {
     const targets = IS_DOULIST ? collectDoulistTargets() : collectFeedTargets();
     const subjectMap = new Map();
@@ -486,11 +505,17 @@
       log('全部命中缓存');
       return;
     }
+    if (loggedOut) return;
     log('需要请求', toFetch.length, '个条目');
 
     // 并发请求
-    const tasks = toFetch.map((info) => () =>
-      fetchInterest(info.id, info.category).then(function (result) {
+    const tasks = toFetch.map((info) => () => {
+      if (loggedOut) return Promise.resolve();
+      return fetchInterest(info.id, info.category).then(function (result) {
+        if (result.loggedOut && !loggedOut) {
+          loggedOut = true;
+          log('未登录，本页不再请求');
+        }
         if (!result.ok) {
           // 不缓存，摘掉 dfmDone 让下一次 scan 重新请求
           for (const link of info.links) delete link.dataset.dfmDone;
@@ -502,8 +527,8 @@
             renderTag(link, result.status, result.rating, info.category);
           }
         }
-      })
-    );
+      });
+    });
 
     processQueue(tasks, MAX_CONCURRENT).then(() => log('处理完成'));
   }

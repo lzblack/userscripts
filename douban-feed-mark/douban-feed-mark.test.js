@@ -131,6 +131,17 @@ test('classifyInterestResponse: 非 200 一律失败（两个接口）', () => {
   assert.equal(classifyInterestResponse('game', 500, ILMEN_UNMARKED).ok, false);
 });
 
+test('classifyInterestResponse: 未登录（403 + r:1 code:403）单独标出，其他失败不标', () => {
+  const anon = '{"code": 403, "r": 1, "error": "???"}';
+  assert.equal(classifyInterestResponse('game', 403, anon).loggedOut, true);
+  assert.equal(classifyInterestResponse('book', 403, anon).loggedOut, true);
+  // 限流、服务器错误、验证页不是未登录，下次 scan 还要重试
+  assert.equal(classifyInterestResponse('book', 429, '').loggedOut, undefined);
+  assert.equal(classifyInterestResponse('book', 403, '<html></html>').loggedOut, undefined);
+  assert.equal(classifyInterestResponse('game', 500, anon).loggedOut, undefined);
+  assert.equal(classifyInterestResponse('game', 200, ILMEN_UNMARKED).loggedOut, undefined);
+});
+
 test('classifyInterestResponse: 200 但响应体是 HTML（验证页/登录页被跟随重定向）→ 失败', () => {
   const page = '<!DOCTYPE html><html><head><title>登录豆瓣</title></head><body></body></html>';
   assert.equal(classifyInterestResponse('book', 200, page).ok, false);
