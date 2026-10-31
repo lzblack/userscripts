@@ -35,7 +35,7 @@ Scripts are published on [GreasyFork](https://greasyfork.org/). To release an up
 
 1. Bump `@version` in the `==UserScript==` metadata block.
 2. Update `CHANGELOG.md` if the script has one (currently only `douban-title-mark-search/`).
-3. Paste the updated script on GreasyFork.
+3. Push to `main`. A GitHub webhook updates the script on GreasyFork automatically; no manual paste.
 
 ## Conventions
 
