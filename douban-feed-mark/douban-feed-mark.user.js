@@ -169,7 +169,8 @@
 
   // ============ API ============
 
-  // 书影音：子域的 /j/subject/{id}/interest，返回 interest_status + 一段 html
+  // 书影音：子域的 /j/subject/{id}/interest，返回一段标记表单 html；
+  // 实测标没标都不带 interest_status，状态看哪个单选框 checked，评分看 #n_rating
   function parseSubjectInterest(data) {
     let status = data.interest_status || null;
     let rating = 0;
@@ -240,8 +241,8 @@
         return { ok: false, reason: 'ilmen 响应缺少预期字段' };
       }
     } else if (CATEGORY_HOSTS[category]) {
-      // 已登录未标记实测（2026-10-30）没有 interest_status 键，只有 html：一个标记表单，
-      // 三个 name="interest" 单选框都没勾。没有这个表单就判断不了标没标，算失败。
+      // 实测（2026-10-30/31，已登录）未标记和已标记都没有 interest_status 键，只有 html：
+      // 一个标记表单，标过的那个 name="interest" 单选框带 checked。没有表单就判断不了，算失败。
       const hasForm = typeof data.html === 'string' && data.html.includes('name="interest"');
       if (!hasForm && !('interest_status' in data)) {
         return { ok: false, reason: '响应里既没有标记表单也没有 interest_status' };

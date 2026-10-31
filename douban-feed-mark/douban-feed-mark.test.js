@@ -204,6 +204,29 @@ test('classifyInterestResponse: 书影音已登录未标记（真实抓包）→
   assert.equal('interest_status' in result.data, false);
 });
 
+test('classifyInterestResponse: 书影音已登录已标记（真实抓包）→ ok', () => {
+  // book.douban.com/j/subject/5939312/interest，2026-10-31，已登录、读过、4 星：
+  // 同样没有 interest_status 键，状态只在 checked="checked" 的单选框里，评分在 #n_rating。
+  // html 删去了样式、分享区和短评，my_tags 清空。
+  const body = JSON.stringify({
+    my_tags: [],
+    html: '\n<div class="indentpop1 clearfix">\n<form action="https://book.douban.com/j/subject/5939312/interest"\n  method="POST"\n  class="j a_interest_form book-sns">\n'
+      + '    <span class="interest-status">\n'
+      + '      <label><input type="radio" value="wish" name="interest"\n              />&nbsp;想读 </label>\n'
+      + '      <label><input type="radio" value="do" name="interest"\n              />&nbsp;在读 </label>\n'
+      + '      <label><input type="radio" value="collect" name="interest"\n                checked="checked"\n              />&nbsp;读过 </label>\n'
+      + '    </span>\n'
+      + '      <input id="n_rating" type="hidden" value="4"\n            name="rating"\n          />\n'
+      + '</form>\n</div>\n',
+    popular_tags: [],
+    tags: [],
+  });
+  const result = classifyInterestResponse('book', 200, body);
+  assert.equal(result.ok, true);
+  assert.equal('interest_status' in result.data, false);
+  assert.match(result.data.html, /value="collect" name="interest"\s+checked="checked"/);
+});
+
 test('classifyInterestResponse: 认不出的类别 → 失败', () => {
   assert.equal(classifyInterestResponse('podcast', 200, ILMEN_UNMARKED).ok, false);
 });
