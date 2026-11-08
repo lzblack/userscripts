@@ -3,15 +3,17 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.7
+// @version      1.1.0
 // @author       lzblack
-// @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
+// @description  在 Amazon / O'Reilly 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
 // @match        https://us.amazon.com/*
+// @match        https://www.oreilly.com/library/view/*
 // @match        https://book.douban.com/new_subject*
 // @connect      book.douban.com
 // @connect      media-amazon.com
 // @connect      ssl-images-amazon.com
+// @connect      www.oreilly.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -319,6 +321,13 @@
   const NEW_SUBJECT_BASE = 'https://book.douban.com/new_subject';
   const HIGHLIGHT_SHADOW = '0 0 0 3px rgba(46,125,50,.6)'; // 绿色「该点这个」描边
 
+  // 来源名 → 展示名 / 角标挂载点（插在该元素之后）。
+  const SOURCES = {
+    amazon: { label: 'Amazon', anchor: '#productTitle' },
+    oreilly: { label: "O'Reilly", anchor: 'h1' },
+  };
+  const sourceLabel = (name) => (SOURCES[name] ? SOURCES[name].label : '来源页');
+
   const deps = {
     // 默认带 cookie：唯一跨域目标是豆瓣，登录态既是 new_subject 的前提，
     // 也是对抗 /isbn/ 风控 403 的主要手段。匿名请求请显式传 anonymous:true。
@@ -589,6 +598,29 @@
   }
 
   // ============================================================
+  // O'Reilly 适配器：书页 JSON-LD → canonical payload
+  // ============================================================
+
+  /** 书目字段全取 JSON-LD；简介优先读页面正文（保留段落与列表，JSON-LD 里已压成一行）。
+   *  O'Reilly 只卖电子版：纸书装帧与定价无从得知，留空交给人工。页面无作者简介。 */
+  function extractOreillyPayload() {
+    const ldTexts = [...document.querySelectorAll('script[type="application/ld+json"]')].map((el) => el.textContent);
+    const book = parseOreillyLd(ldTexts);
+    if (!book) return null;
+    const descEl = document.querySelector('[data-testid="titleDescription"]');
+    const description = (descEl && descriptionBlockText(descEl)) || book.description;
+    return {
+      ...book,
+      description,
+      binding: null,
+      bindingRaw: '',
+      price: null,
+      authorBio: '',
+      source: { name: 'oreilly', url: location.origin + location.pathname, capturedAt: Date.now() },
+    };
+  }
+
+  // ============================================================
   // 豆瓣查重服务（与来源无关）
   // ============================================================
 
@@ -650,7 +682,7 @@
   }
 
   // ============================================================
-  // Amazon 侧角标 UI
+  // 来源页角标 UI
   // ============================================================
 
   const BADGE_ID = 'dbb-badge';
@@ -673,7 +705,7 @@
       .join('');
   }
 
-  function ensureBadge() {
+  function ensureBadge(sourceName) {
     let box = document.getElementById(BADGE_ID);
     if (box) return box;
     box = document.createElement('div');
@@ -681,7 +713,12 @@
     box.style.cssText =
       'margin:12px 0;padding:12px 14px;border:1px solid #d6c79b;border-radius:8px;' +
       'background:#fcf9ef;font-size:13px;line-height:1.6;color:#333;max-width:640px';
-    const title = document.querySelector('#productTitle');
+    // 角标里的链接都指向豆瓣：统一用豆瓣蓝，不继承来源站的链接样式（O'Reilly 是红色大字）。
+    const style = document.createElement('style');
+    style.textContent = `#${BADGE_ID} a{color:#37a;font:inherit;text-decoration:none}#${BADGE_ID} a:hover{text-decoration:underline}`;
+    document.head.appendChild(style);
+    const src = SOURCES[sourceName];
+    const title = src && document.querySelector(src.anchor);
     if (title && title.parentElement) {
       title.parentElement.insertBefore(box, title.nextSibling);
     } else {
@@ -692,10 +729,15 @@
   }
 
   function renderBadge(state, payload, result) {
-    const box = ensureBadge();
+    const sourceName = payload && payload.source && payload.source.name;
+    const box = ensureBadge(sourceName);
     let head = '';
     if (state === 'loading') head = '<b>豆瓣查重中…</b>';
-    else if (state === 'no-isbn') head = '<b style="color:#c0392b">未找到 ISBN</b> — 请切换到 print edition 页面。';
+    else if (state === 'no-isbn') {
+      head = sourceName === 'oreilly'
+        ? '<b style="color:#c0392b">未找到纸书 ISBN</b> — 这本书可能只有电子版。'
+        : '<b style="color:#c0392b">未找到 ISBN</b> — 请切换到 print edition 页面。';
+    }
     else if (state === 'hit') {
       const r = result.rating ? `豆瓣 ${result.rating} 分` : '豆瓣已收录';
       head = `<b style="color:#2e7d32">✓ ${r}</b> · <a href="${escapeHtml(result.url)}" target="_blank" rel="noopener">直达条目 →</a>`;
@@ -732,6 +774,18 @@
     if (!document.querySelector('#productTitle')) return; // 非商品详情页，静默早退
     if (!isBookPage()) return; // 非图书商品（电子产品等），静默早退
     const payload = extractAmazonPayload();
+    if (!payload.isbn13) {
+      renderBadge('no-isbn', payload, null);
+      return;
+    }
+    renderBadge('loading', payload, null);
+    const result = await dedup(payload.isbn13, payload.title);
+    renderBadge(result.kind, payload, result);
+  }
+
+  async function runOreilly() {
+    const payload = extractOreillyPayload();
+    if (!payload) return; // 无 Book JSON-LD（视频课、目录页等），静默早退
     if (!payload.isbn13) {
       renderBadge('no-isbn', payload, null);
       return;
@@ -899,7 +953,7 @@
   function fillStep2(root, payload) {
     const formIsbn = formIsbnDigits(root);
     if (formIsbn && payload.isbn13 && formIsbn !== payload.isbn13) {
-      injectBanner(root, `<b style="color:#c0392b">未自动回填</b>：表单 ISBN（${escapeHtml(formIsbn)}）与 Amazon 抓取的（${escapeHtml(payload.isbn13)}）不一致，疑似不同书。请手动核对。`);
+      injectBanner(root, `<b style="color:#c0392b">未自动回填</b>：表单 ISBN（${escapeHtml(formIsbn)}）与 ${escapeHtml(sourceLabel(payload.source && payload.source.name))} 抓取的（${escapeHtml(payload.isbn13)}）不一致，疑似不同书。请手动核对。`);
       return; // 不动表单、不消费 payload
     }
 
@@ -915,12 +969,12 @@
     // 把封面单独交棒给下一页（上传封面页）。主 payload 在此消费即删，
     // 既保留封面、又不会在第二步重载时重复回填覆盖用户编辑。
     if (payload.coverUrl) {
-      GM_setValue(COVER_KEY, JSON.stringify({ coverUrl: payload.coverUrl, source: { capturedAt: Date.now() } }));
+      GM_setValue(COVER_KEY, JSON.stringify({ coverUrl: payload.coverUrl, source: { name: payload.source && payload.source.name, capturedAt: Date.now() } }));
     }
     GM_deleteValue(STORAGE_KEY);
   }
 
-  /** 上传封面页：拉 Amazon 封面 blob，DataTransfer 注入 file input。不自动提交。 */
+  /** 上传封面页：拉来源页封面 blob，DataTransfer 注入 file input。不自动提交。 */
   async function runCoverUpload(fileInput) {
     let info = null;
     const raw = GM_getValue(COVER_KEY);
@@ -945,13 +999,13 @@
       fileInput.files = dt.files;
       fileInput.dispatchEvent(new Event('change', { bubbles: true }));
       // 用 blob 生成预览（显示真正会上传的字节，让用户能核对封面）
-      injectCoverBanner(fileInput, true, info.coverUrl, URL.createObjectURL(blob));
+      injectCoverBanner(fileInput, true, info, URL.createObjectURL(blob));
     } catch {
-      injectCoverBanner(fileInput, false, info.coverUrl, null);
+      injectCoverBanner(fileInput, false, info, null);
     }
   }
 
-  function injectCoverBanner(fileInput, ok, coverUrl, previewUrl) {
+  function injectCoverBanner(fileInput, ok, info, previewUrl) {
     const form = fileInput.closest('form') || fileInput.parentElement;
     const submit = form.querySelector('input[name="img_submit"], input[type="submit"]');
     if (ok && submit) submit.style.boxShadow = HIGHLIGHT_SHADOW;
@@ -961,8 +1015,8 @@
     injectBanner(
       form,
       ok
-        ? `<b style="color:#2e7d32">封面已就绪</b>（来自 Amazon）。核对下方预览后点「上传图片」。${preview}`
-        : `<b style="color:#c0392b">封面自动获取失败</b>。可<a href="${escapeHtml(safeLinkUrl(coverUrl))}" target="_blank" rel="noopener">打开原图</a>手动选择，或点「跳过」。`
+        ? `<b style="color:#2e7d32">封面已就绪</b>（来自 ${escapeHtml(sourceLabel(info.source && info.source.name))}）。核对下方预览后点「上传图片」。${preview}`
+        : `<b style="color:#c0392b">封面自动获取失败</b>。可<a href="${escapeHtml(safeLinkUrl(info.coverUrl))}" target="_blank" rel="noopener">打开原图</a>手动选择，或点「跳过」。`
     );
   }
 
@@ -995,6 +1049,8 @@
   const host = location.hostname;
   if (isAmazonHost(host)) {
     runAmazon();
+  } else if (host === 'www.oreilly.com') {
+    runOreilly();
   } else if (host === 'book.douban.com') {
     runDouban();
   }
