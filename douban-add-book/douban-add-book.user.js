@@ -702,29 +702,21 @@
       ['定价', p.price ? `${p.price.currency} ${p.price.amount}` : '—'],
       ['内容简介', p.description ? `${p.description.length} 字` : '（缺失，必填）'],
     ];
-    return rows
-      .map(([k, v]) => `<div style="display:flex;gap:8px"><b style="flex:0 0 64px;color:#666">${k}</b><span>${escapeHtml(String(v))}</span></div>`)
-      .join('');
+    return rows.map(([k, v]) => `<b>${k}</b><span>${escapeHtml(String(v))}</span>`).join('');
   }
 
   function ensureBadge(sourceName) {
     let box = document.getElementById(BADGE_ID);
     if (box) return box;
-    box = document.createElement('div');
-    box.id = BADGE_ID;
-    box.style.cssText =
-      'margin:12px 0;padding:12px 14px;border:1px solid #d6c79b;border-radius:8px;' +
-      'background:#fcf9ef;font-size:13px;line-height:1.6;color:#333;max-width:640px';
-    // 角标里的链接都指向豆瓣：统一用豆瓣蓝，不继承来源站的链接样式（O'Reilly 是红色大字）。
     const style = document.createElement('style');
-    style.textContent = `#${BADGE_ID} a{color:#37a;font:inherit;text-decoration:none}#${BADGE_ID} a:hover{text-decoration:underline}`;
+    style.textContent = BADGE_CSS;
     document.head.appendChild(style);
     const src = SOURCES[sourceName];
     const title = src && document.querySelector(src.anchor);
     if (title && title.parentElement) {
       title.parentElement.insertBefore(box, title.nextSibling);
     } else {
-      box.style.cssText += ';position:fixed;top:12px;right:12px;z-index:99999;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.2)';
+      box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;box-shadow:0 2px 12px rgba(0,0,0,.2)';
       document.body.appendChild(box);
     }
     return box;
@@ -734,39 +726,57 @@
     const sourceName = payload && payload.source && payload.source.name;
     const box = ensureBadge(sourceName);
     let head = '';
-    if (state === 'loading') head = '<b>豆瓣查重中…</b>';
+    if (state === 'loading') head = '查重中…';
     else if (state === 'no-isbn') {
       head = sourceName === 'oreilly'
-        ? '<b style="color:#c0392b">未找到纸书 ISBN</b> — 这本书可能只有电子版。'
-        : '<b style="color:#c0392b">未找到 ISBN</b> — 请切换到 print edition 页面。';
+        ? '<span class="dbb-bad">未找到纸书 ISBN</span> 可能只有电子版'
+        : '<span class="dbb-bad">未找到 ISBN</span> 请切换到 print edition 页面';
     }
     else if (state === 'hit') {
-      const r = result.rating ? `豆瓣 ${result.rating} 分` : '豆瓣已收录';
-      head = `<b style="color:#2e7d32">✓ ${r}</b> · <a href="${escapeHtml(result.url)}" target="_blank" rel="noopener">直达条目 →</a>`;
+      const r = result.rating ? `${result.rating} 分` : '已收录';
+      head = `<span class="dbb-ok">${r}</span><a href="${escapeHtml(result.url)}" target="_blank" rel="noopener">直达条目 →</a>`;
     } else if (state === 'error') {
       const q = encodeURIComponent(payload ? payload.title : '');
-      head = `<b style="color:#c0392b">查重失败</b>（风控/网络）· <a href="https://search.douban.com/book/subject_search?search_text=${q}" target="_blank" rel="noopener">手动搜索 →</a>`;
+      head = `<span class="dbb-bad">查重失败</span><a href="https://search.douban.com/book/subject_search?search_text=${q}" target="_blank" rel="noopener">手动搜索 →</a>`;
     } else if (state === 'other') {
+  // 一行胶囊，Amazon / O'Reilly 同一套样式；字段清单默认折叠。字体、颜色、链接样式都显式
+  // 指定，不继承来源站（O'Reilly 的链接是红色大字、标题字体也不同）。
+  const BADGE_CSS = `
+#${BADGE_ID}{display:block;width:fit-content;max-width:100%;margin:8px 0;padding:4px 10px;
+  border:1px solid #dcdcdc;border-radius:6px;background:#fff;color:#333;
+  font:12px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:normal;text-transform:none;text-align:left}
+#${BADGE_ID} *{font:inherit;box-sizing:border-box}
+#${BADGE_ID} .dbb-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+#${BADGE_ID} .dbb-tag{color:#999}
+#${BADGE_ID} .dbb-ok{color:#2e7d32;font-weight:600}
+#${BADGE_ID} .dbb-warn{color:#b8860b;font-weight:600}
+#${BADGE_ID} .dbb-bad{color:#c0392b;font-weight:600}
+#${BADGE_ID} a{color:#37a;text-decoration:none}
+#${BADGE_ID} a:hover{text-decoration:underline}
+#${BADGE_ID} button{cursor:pointer;margin:0;padding:0 8px;border:0;border-radius:4px;background:#2e7d32;color:#fff;line-height:20px}
+#${BADGE_ID} button.dbb-more{padding:0;background:none;color:#37a}
+#${BADGE_ID} .dbb-fields{margin:4px 0 2px;padding-top:4px;border-top:1px dashed #e3e3e3;display:grid;grid-template-columns:auto 1fr;gap:0 10px}
+#${BADGE_ID} .dbb-fields b{color:#999;font-weight:400}
+#${BADGE_ID} [hidden]{display:none}`;
+
       const links = result.items
         .map((it) => `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.title)}${it.year ? `(${escapeHtml(it.year)})` : ''}</a>`)
         .join('、');
-      head = `<b style="color:#b8860b">豆瓣有其他版本</b>：${links}`;
+      head = `<span class="dbb-warn">有其他版本</span>${links}`;
     } else if (state === 'absent') {
-      head = '<b>豆瓣未收录</b>';
+      head = '<span>未收录</span>';
     }
 
     let action = '';
-    if (state === 'other' || state === 'absent') {
-      if (!payload.description) {
-        action = '<div style="margin-top:8px;color:#c0392b">内容简介缺失（豆瓣必填）— 无法自动添加，请确认这是图书详情页。</div>';
-      } else {
-        const label = state === 'other' ? '仍要添加此版本' : '+ 添加到豆瓣';
-        action = `<div style="margin-top:10px"><button id="dbb-add" style="cursor:pointer;padding:6px 14px;border:0;border-radius:6px;background:#2e7d32;color:#fff;font-size:13px">${label}</button></div>`;
-      }
+    const canAdd = state === 'other' || state === 'absent';
+    if (canAdd) {
+      action = payload.description
+        ? `<button type="button" id="dbb-add">${state === 'other' ? '仍要添加此版本' : '+ 添加'}</button>`
+        : '<span class="dbb-bad">缺内容简介，无法添加</span>';
+      action += '<button type="button" class="dbb-more">字段 ▾</button>';
     }
-
-    const summary = payload ? `<div style="margin-top:10px;border-top:1px dashed #e0d6b0;padding-top:8px">${fieldSummaryHtml(payload)}</div>` : '';
-    box.innerHTML = `<div>${head}</div>${action}${summary}`;
+    const fields = canAdd ? `<div class="dbb-fields" hidden>${fieldSummaryHtml(payload)}</div>` : '';
+    box.innerHTML = `<div class="dbb-line"><span class="dbb-tag">豆瓣</span>${head}${action}</div>${fields}`;
 
     const btn = box.querySelector('#dbb-add');
     if (btn) btn.addEventListener('click', () => stashAndOpen(payload));
@@ -777,6 +787,8 @@
     if (!isBookPage()) return; // 非图书商品（电子产品等），静默早退
     const payload = extractAmazonPayload();
     if (!payload.isbn13) {
+    box = document.createElement('div');
+    box.id = BADGE_ID;
       renderBadge('no-isbn', payload, null);
       return;
     }
@@ -813,6 +825,7 @@
     }
     return null;
   }
+    // 字段清单只在要添加时有用（核对将被回填的内容），其余状态不显示。
 
   function fireValue(el, value) {
     el.value = value;
@@ -828,6 +841,14 @@
     return true;
   }
 
+    const more = box.querySelector('.dbb-more');
+    if (more) {
+      more.addEventListener('click', () => {
+        const list = box.querySelector('.dbb-fields');
+        list.hidden = !list.hidden;
+        more.textContent = list.hidden ? '字段 ▾' : '字段 ▴';
+      });
+    }
   function setTextareaByLabel(root, labelText, value) {
     const item = fieldByLabel(root, labelText);
     const el = item && item.querySelector('textarea.textarea_basic');
