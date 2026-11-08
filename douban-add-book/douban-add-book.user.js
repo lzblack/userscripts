@@ -243,10 +243,15 @@
     if (date.y) filled.push('出版日期');
     else { skipped.push('出版日期'); warnings.push('缺出版日期'); }
 
-    const radioValue = bindingRadioValue(p.binding);
-    const binding = { radioValue, otherText: radioValue === 'other' ? (p.bindingRaw || '') : '' };
-    filled.push('装帧');
-    if (radioValue === 'other') warnings.push(`装帧落「其他」：${p.bindingRaw || '?'}`);
+    // binding 为 null 表示来源不知道纸书装帧（O'Reilly）：跳过，不猜。
+    let binding = null;
+    if (p.binding == null) skipped.push('装帧');
+    else {
+      const radioValue = bindingRadioValue(p.binding);
+      binding = { radioValue, otherText: radioValue === 'other' ? (p.bindingRaw || '') : '' };
+      filled.push('装帧');
+      if (radioValue === 'other') warnings.push(`装帧落「其他」：${p.bindingRaw || '?'}`);
+    }
 
     return { texts, authors, textareas, date, binding, warnings, filled, skipped };
   }
@@ -616,7 +621,7 @@
       ['出版社', p.publisher || '—'],
       ['出版日期', p.pubDate.y ? [p.pubDate.y, p.pubDate.m, p.pubDate.d].filter(Boolean).join('-') : '—'],
       ['页数', p.pageCount || '—'],
-      ['装帧', p.binding === 'other' ? `其他（${p.bindingRaw || '?'}）` : p.binding],
+      ['装帧', p.binding == null ? '—' : p.binding === 'other' ? `其他（${p.bindingRaw || '?'}）` : p.binding],
       ['定价', p.price ? `${p.price.currency} ${p.price.amount}` : '—'],
       ['内容简介', p.description ? `${p.description.length} 字` : '（缺失，必填）'],
     ];
@@ -782,6 +787,7 @@
   }
 
   function setBinding(root, binding) {
+    if (!binding) return;
     const item = fieldByLabel(root, '装帧');
     if (!item) return;
     const radio = item.querySelector(`input[type="radio"][value="${binding.radioValue}"]`);

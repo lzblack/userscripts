@@ -330,3 +330,12 @@ test('buildFillPlan: null price is skipped, not filled', () => {
   assert.ok(!plan.texts.some((t) => t.label === '定价'));
   assert.ok(plan.skipped.includes('定价'));
 });
+
+test('buildFillPlan: unknown binding (null) is skipped, not guessed', () => {
+  // O'Reilly 只卖电子版，纸书装帧无从得知——不碰装帧控件，也不报「落其他」。
+  const plan = buildFillPlan({ ...SAPIENS, binding: null, bindingRaw: '' });
+  assert.equal(plan.binding, null);
+  assert.ok(plan.skipped.includes('装帧'));
+  assert.ok(!plan.filled.includes('装帧'));
+  assert.ok(!plan.warnings.some((w) => w.includes('装帧')));
+});
