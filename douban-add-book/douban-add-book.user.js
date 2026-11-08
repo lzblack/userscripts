@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.2.2
+// @version      1.2.3
 // @author       lzblack
 // @description  在 Amazon / O'Reilly 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -182,7 +182,9 @@
   function parseOreillyLd(ldTexts) {
     const b = findLdBook(ldTexts);
     if (!b) return null;
-    const { title, subtitle } = splitTitle(b.name);
+    // 不按冒号拆：O'Reilly 的副标题在商品记录里单独存放，name 里的冒号属于书名
+    // （NVIDIA: Open Source Ecosystem/0642572433864）。副标题由 oreillyProductExtras 补。
+    const title = str(b.name).trim();
     const isbn = str(b.isbn).replace(/[^0-9]/g, '');
     const nameOf = (v) => str(v && typeof v === 'object' ? v.name : v).trim();
     const pages = Number(b.numberOfPages);
@@ -192,7 +194,7 @@
     const printIsbn = validateIsbn13(isbn) && !(coverId && coverId[1] === isbn);
     return {
       title,
-      subtitle,
+      subtitle: '',
       authors: [].concat(b.author || []).map(nameOf).filter(Boolean),
       isbn13: printIsbn ? isbn : null,
       publisher: nameOf(b.publisher),
@@ -670,7 +672,7 @@
     const extras = oreillyProductExtras(parseOreillyHydration(hydrationScript && hydrationScript.textContent), book.isbn13);
     return {
       ...book,
-      subtitle: book.subtitle || extras.subtitle,
+      subtitle: extras.subtitle,
       description,
       binding: null,
       bindingRaw: '',

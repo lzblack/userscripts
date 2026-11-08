@@ -376,11 +376,13 @@ test('parseOreillyLd: Programming Rust 3e', () => {
   assert.equal(b.coverUrl, 'https://www.oreilly.com/library/cover/9781098176228/1200w/');
 });
 
-test('parseOreillyLd: title with a colon splits into title/subtitle', () => {
-  const ld = JSON.stringify({ '@type': 'Book', name: 'Learning Go: An Idiomatic Approach', isbn: '9781492077213' });
+test('parseOreillyLd: a colon in the name is part of the title, not a subtitle', () => {
+  // O'Reilly 的副标题单独存在商品记录里；name 里的冒号属于书名本身。见
+  // NVIDIA: Open Source Ecosystem/0642572433864（副标题是 A Practitioner's Guide to …）。
+  const ld = JSON.stringify({ '@type': 'Book', name: 'NVIDIA: Open Source Ecosystem', isbn: '9798295901928' });
   const b = parseOreillyLd([ld]);
-  assert.equal(b.title, 'Learning Go');
-  assert.equal(b.subtitle, 'An Idiomatic Approach');
+  assert.equal(b.title, 'NVIDIA: Open Source Ecosystem');
+  assert.equal(b.subtitle, '');
 });
 
 test('parseOreillyLd: invalid or missing isbn → null (caller blocks)', () => {
