@@ -407,3 +407,12 @@ test('parseOreillyLd: missing fields degrade to empty values, never throw', () =
   assert.equal(b.description, '');
   assert.equal(b.coverUrl, '');
 });
+
+test('parseOreillyLd: isbn equal to the ebook id is not a print ISBN → null', () => {
+  // 只有电子版的书，isbn 字段可能就是电子版 ISBN；拿它去豆瓣查不到，用户会照着加出一个错误条目。
+  const ld = JSON.stringify({
+    '@type': 'Book', name: 'X', isbn: '9781492052586',
+    image: { url: 'https://learning.oreilly.com/library/cover/9781492052586/250w/' },
+  });
+  assert.equal(parseOreillyLd([ld]).isbn13, null);
+});

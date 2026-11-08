@@ -188,11 +188,13 @@
     const pages = Number(b.numberOfPages);
     const image = str(b.image && typeof b.image === 'object' ? b.image.url : b.image);
     const coverId = image.match(/\/library\/cover\/(\d+)\//);
+    // isbn 等于电子版 id 时它不是纸书 ISBN（只有电子版的书）：按缺失处理，交给 no-isbn 提示。
+    const printIsbn = validateIsbn13(isbn) && !(coverId && coverId[1] === isbn);
     return {
       title,
       subtitle,
       authors: [].concat(b.author || []).map(nameOf).filter(Boolean),
-      isbn13: validateIsbn13(isbn) ? isbn : null,
+      isbn13: printIsbn ? isbn : null,
       publisher: nameOf(b.publisher),
       pubDate: parseDate(b.datePublished) || { y: null, m: null, d: null },
       pageCount: Number.isInteger(pages) && pages > 0 ? pages : null,
@@ -1050,7 +1052,10 @@
   if (isAmazonHost(host)) {
     runAmazon();
   } else if (host === 'www.oreilly.com') {
-    runOreilly();
+    // 书页是 SSR + React 水合：水合前往它的 DOM 插节点会触发 React #418（实测
+    // DOMContentLoaded 时注入必现，load 后注入 3/3 无错），所以等 load 再挂角标。
+    if (document.readyState === 'complete') runOreilly();
+    else window.addEventListener('load', () => runOreilly(), { once: true });
   } else if (host === 'book.douban.com') {
     runDouban();
   }
