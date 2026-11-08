@@ -53,7 +53,7 @@
 
 ## 同作者的其他豆瓣增强脚本
 
-- [豆瓣一键添书](https://greasyfork.org/zh-CN/scripts/582130) — 同样的流程，从 Amazon 图书页一键加书到豆瓣
+- [豆瓣一键添书](https://greasyfork.org/zh-CN/scripts/582130) — 同样的流程，从 Amazon / O'Reilly 图书页一键加书到豆瓣
 - [豆瓣评分汇](https://greasyfork.org/zh-CN/scripts/572796) — 聚合 IMDB、烂番茄、Letterboxd、Goodreads 等十多个平台的评分
 - [豆瓣条目 NeoDB 评分增强](https://greasyfork.org/zh-CN/scripts/559133) — 在豆瓣条目页加 NeoDB.social 的评分展示
 - [豆瓣广播：这个我标过](https://greasyfork.org/zh-CN/scripts/572857) — 首页广播流里显示你对条目的标记状态和评分
