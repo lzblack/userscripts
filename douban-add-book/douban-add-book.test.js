@@ -20,8 +20,12 @@ const {
   isBookCategory,
   isAmazonHost,
   parseOreillyLd,
+  parseOreillyHydration,
+  oreillyProductExtras,
+  bioHtmlToText,
 } = require('./douban-add-book.user.js');
 const OREILLY = require('./fixture-oreilly.json');
+const OREILLY_PRODUCT = require('./fixture-oreilly-product.json');
 
 const SAPIENS = {
   title: 'Sapiens',
@@ -415,4 +419,58 @@ test('parseOreillyLd: isbn equal to the ebook id is not a print ISBN → null', 
     image: { url: 'https://learning.oreilly.com/library/cover/9781492052586/250w/' },
   });
   assert.equal(parseOreillyLd([ld]).isbn13, null);
+});
+
+// ── O'Reilly 商品记录（window.__staticRouterHydrationData）──────────────────
+// fixture-oreilly-product.json：2026-11-08 从三本书页抓下的商品记录，只留用到的字段（已去掉邮箱）。
+const hydrationOf = (key) => ({
+  loaderData: { bookShellContainer: { data: { productServiceData: OREILLY_PRODUCT[key].productServiceData } } },
+});
+
+test('parseOreillyHydration: reads the JSON.parse("…") string literal in the page script', () => {
+  const obj = { loaderData: { a: 'x "quoted" \ back' } };
+  const text = 'window.__staticRouterHydrationData = JSON.parse(' + JSON.stringify(JSON.stringify(obj)) + ');';
+  assert.deepEqual(parseOreillyHydration(text), obj);
+});
+
+test('parseOreillyHydration: other scripts or broken literals → null', () => {
+  assert.equal(parseOreillyHydration('window.VWO = []'), null);
+  assert.equal(parseOreillyHydration('window.__staticRouterHydrationData = JSON.parse("{bad");'), null);
+});
+
+test('oreillyProductExtras: 2e — subtitle, authors-only bios in viewOrder, USD list price', () => {
+  const x = oreillyProductExtras(hydrationOf('programming-rust-2e'), '9781492052593');
+  assert.equal(x.subtitle, 'Fast, Safe Systems Development');
+  assert.deepEqual(x.price, { currency: 'USD', amount: '79.99' });
+  const names = x.authorBio.split('\n\n').map((block) => block.split('\n')[0]);
+  assert.deepEqual(names, ['Jim Blandy', 'Jason Orendorff', 'Leonora F. S. Tindall']);
+  assert.match(x.authorBio, /^Jim Blandy\nJim Blandy has been programming since 1981/);
+  assert.ok(!/Roumeliotis|Bleiel|McQuade/.test(x.authorBio)); // 编辑不是作者
+});
+
+test('oreillyProductExtras: early-release title with an HTML bio', () => {
+  const x = oreillyProductExtras(hydrationOf('from-models-to-money-er'), '9798341674042');
+  assert.equal(x.subtitle, 'A Leaders Guide to Understanding AI Unit Economics and the Total Cost of Intelligence');
+  assert.deepEqual(x.price, { currency: 'USD', amount: '44.99' });
+  assert.ok(!/<p>/.test(x.authorBio));
+  assert.match(x.authorBio, /^Davood Shamsi\n/);
+  assert.match(x.authorBio, /measurable results\.\n\nPreviously, as Senior Vice President/);
+});
+
+test('oreillyProductExtras: no record for this ISBN → empty, never another edition', () => {
+  assert.deepEqual(oreillyProductExtras(hydrationOf('programming-rust-2e'), '9781098176235'), { subtitle: '', authorBio: '', price: null });
+  assert.deepEqual(oreillyProductExtras(null, '9781492052593'), { subtitle: '', authorBio: '', price: null });
+});
+
+test('oreillyProductExtras: a single author gets no name header', () => {
+  const h = { loaderData: { bookShellContainer: { data: { productServiceData: { data: [{
+    isbn13: '9781492052593',
+    contributors: [{ firstName: 'A', lastName: 'B', role: { name: 'Author' }, biography: 'Bio.' }],
+  }] } } } } };
+  assert.equal(oreillyProductExtras(h, '9781492052593').authorBio, 'Bio.');
+});
+
+test('bioHtmlToText: <p>/<br> become breaks, tags dropped, entities decoded', () => {
+  assert.equal(bioHtmlToText('One &amp; two.\n<p>\nThree<br>four <b>bold</b>.</p>'), 'One & two.\n\nThree\nfour bold.');
+  assert.equal(bioHtmlToText('Plain text.'), 'Plain text.');
 });

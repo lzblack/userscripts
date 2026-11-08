@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.1.0
+// @version      1.2.0
 // @author       lzblack
 // @description  在 Amazon / O'Reilly 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -203,6 +203,59 @@
     };
   }
 
+  /** 页面脚本 `window.__staticRouterHydrationData = JSON.parse("…")` → 对象；不是它或解析失败返回 null。
+   *  不读 window 上的变量：Tampermonkey 沙箱里拿不到页面全局，读脚本文本两边都一样。 */
+  function parseOreillyHydration(scriptText) {
+    const m = str(scriptText).match(/__staticRouterHydrationData\s*=\s*JSON\.parse\(("(?:[^"\\]|\\.)*")\)/);
+    if (!m) return null;
+    try { return JSON.parse(JSON.parse(m[1])); } catch { return null; }
+  }
+
+  /** 作者简介里偶有 HTML（见 From Models to Money/0642572328214）：段落与换行保留，其余标签去掉。 */
+  function bioHtmlToText(html) {
+    return str(html)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?p\b[^>]*>/gi, '\n\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .replace(/[^\S\n]+/g, ' ')
+      .split('\n').map((l) => l.trim()).join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /**
+   * 纯函数：从书页的商品记录取 JSON-LD 没有的字段——副标题、作者简介、美国标价。
+   * 只认 isbn13 与纸书 ISBN 相同的那条，绝不拿别的版本的数据凑数。作者按 viewOrder 排，
+   * 只取 role 为 Author 的人（记录里还有编辑、项目经理）；多位作者时冠名，与 Amazon 卡片一致。
+   */
+  function oreillyProductExtras(hydration, isbn13) {
+    const empty = { subtitle: '', authorBio: '', price: null };
+    const data = hydration && hydration.loaderData && hydration.loaderData.bookShellContainer &&
+      hydration.loaderData.bookShellContainer.data;
+    const records = (data && data.productServiceData && data.productServiceData.data) || [];
+    const rec = isbn13 && records.find((r) => r && r.isbn13 === isbn13);
+    if (!rec) return empty;
+
+    const order = (c) => (typeof c.viewOrder === 'number' ? c.viewOrder : Infinity);
+    const authors = (rec.contributors || [])
+      .filter((c) => c && c.role && c.role.name === 'Author' && str(c.biography).trim())
+      .sort((a, b) => order(a) - order(b))
+      .map((c) => ({
+        name: str(c.penName).trim() || [c.firstName, c.middleName, c.lastName].map((s) => str(s).trim()).filter(Boolean).join(' '),
+        bio: bioHtmlToText(c.biography),
+      }));
+    const multi = authors.length > 1;
+    const authorBio = authors.map((a) => (multi && a.name ? a.name + '\n' + a.bio : a.bio)).join('\n\n');
+
+    const usd = (rec.prices || []).filter((p) => p && p.country && p.country.currencyCode === 'USD');
+    const list = usd.find((p) => p.priceType && p.priceType.id === '01') || usd[0];
+    const price = list ? normalizePrice(`USD ${list.price}`) : null;
+
+    return { subtitle: str(rec.subtitle).trim(), authorBio, price };
+  }
+
   /** 剥掉 Amazon 简介尾部的展开切换文案（"Read more" / "Read less"）。 */
   function cleanDescription(input) {
     return str(input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
@@ -309,6 +362,7 @@
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
       normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, descriptionBlockText, isPayloadFresh,
       bindingRadioValue, buildFillPlan, isBookCategory, isAmazonHost, parseOreillyLd,
+      parseOreillyHydration, oreillyProductExtras, bioHtmlToText,
     };
     return;
   }
@@ -603,21 +657,25 @@
   // O'Reilly 适配器：书页 JSON-LD → canonical payload
   // ============================================================
 
-  /** 书目字段全取 JSON-LD；简介优先读页面正文（保留段落与列表，JSON-LD 里已压成一行）。
-   *  O'Reilly 只卖电子版：纸书装帧与定价无从得知，留空交给人工。页面无作者简介。 */
+  /** 书目字段取 JSON-LD；副标题、作者简介、标价取页面商品记录（JSON-LD 没有）。简介优先读
+   *  页面正文（保留段落与列表，JSON-LD 里已压成一行）。纸书装帧无从得知，留空交给人工。 */
   function extractOreillyPayload() {
     const ldTexts = [...document.querySelectorAll('script[type="application/ld+json"]')].map((el) => el.textContent);
     const book = parseOreillyLd(ldTexts);
     if (!book) return null;
     const descEl = document.querySelector('[data-testid="titleDescription"]');
     const description = (descEl && descriptionBlockText(descEl)) || book.description;
+    const hydrationScript = [...document.querySelectorAll('script:not([src])')]
+      .find((el) => el.textContent.includes('__staticRouterHydrationData'));
+    const extras = oreillyProductExtras(parseOreillyHydration(hydrationScript && hydrationScript.textContent), book.isbn13);
     return {
       ...book,
+      subtitle: book.subtitle || extras.subtitle,
       description,
       binding: null,
       bindingRaw: '',
-      price: null,
-      authorBio: '',
+      price: extras.price,
+      authorBio: extras.authorBio,
       source: { name: 'oreilly', url: location.origin + location.pathname, capturedAt: Date.now() },
     };
   }
@@ -689,6 +747,26 @@
 
   const BADGE_ID = 'dbb-badge';
 
+  // 一行胶囊，Amazon / O'Reilly 同一套样式；字段清单默认折叠。字体、颜色、链接样式都显式
+  // 指定，不继承来源站（O'Reilly 的链接是红色大字、标题字体也不同）。
+  const BADGE_CSS = `
+#${BADGE_ID}{display:block;width:fit-content;max-width:100%;margin:8px 0;padding:4px 10px;
+  border:1px solid #dcdcdc;border-radius:6px;background:#fff;color:#333;
+  font:12px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:normal;text-transform:none;text-align:left}
+#${BADGE_ID} *{font:inherit;box-sizing:border-box}
+#${BADGE_ID} .dbb-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+#${BADGE_ID} .dbb-tag{color:#999}
+#${BADGE_ID} .dbb-ok{color:#2e7d32;font-weight:600}
+#${BADGE_ID} .dbb-warn{color:#b8860b;font-weight:600}
+#${BADGE_ID} .dbb-bad{color:#c0392b;font-weight:600}
+#${BADGE_ID} a{color:#37a;text-decoration:none}
+#${BADGE_ID} a:hover{text-decoration:underline}
+#${BADGE_ID} button{cursor:pointer;margin:0;padding:0 8px;border:0;border-radius:4px;background:#2e7d32;color:#fff;line-height:20px}
+#${BADGE_ID} button.dbb-more{padding:0;background:none;color:#37a}
+#${BADGE_ID} .dbb-fields{margin:4px 0 2px;padding-top:4px;border-top:1px dashed #e3e3e3;display:grid;grid-template-columns:auto 1fr;gap:0 10px}
+#${BADGE_ID} .dbb-fields b{color:#999;font-weight:400}
+#${BADGE_ID} [hidden]{display:none}`;
+
   function fieldSummaryHtml(p) {
     const rows = [
       ['正标题', p.title],
@@ -711,6 +789,8 @@
     const style = document.createElement('style');
     style.textContent = BADGE_CSS;
     document.head.appendChild(style);
+    box = document.createElement('div');
+    box.id = BADGE_ID;
     const src = SOURCES[sourceName];
     const title = src && document.querySelector(src.anchor);
     if (title && title.parentElement) {
@@ -739,26 +819,6 @@
       const q = encodeURIComponent(payload ? payload.title : '');
       head = `<span class="dbb-bad">查重失败</span><a href="https://search.douban.com/book/subject_search?search_text=${q}" target="_blank" rel="noopener">手动搜索 →</a>`;
     } else if (state === 'other') {
-  // 一行胶囊，Amazon / O'Reilly 同一套样式；字段清单默认折叠。字体、颜色、链接样式都显式
-  // 指定，不继承来源站（O'Reilly 的链接是红色大字、标题字体也不同）。
-  const BADGE_CSS = `
-#${BADGE_ID}{display:block;width:fit-content;max-width:100%;margin:8px 0;padding:4px 10px;
-  border:1px solid #dcdcdc;border-radius:6px;background:#fff;color:#333;
-  font:12px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:normal;text-transform:none;text-align:left}
-#${BADGE_ID} *{font:inherit;box-sizing:border-box}
-#${BADGE_ID} .dbb-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
-#${BADGE_ID} .dbb-tag{color:#999}
-#${BADGE_ID} .dbb-ok{color:#2e7d32;font-weight:600}
-#${BADGE_ID} .dbb-warn{color:#b8860b;font-weight:600}
-#${BADGE_ID} .dbb-bad{color:#c0392b;font-weight:600}
-#${BADGE_ID} a{color:#37a;text-decoration:none}
-#${BADGE_ID} a:hover{text-decoration:underline}
-#${BADGE_ID} button{cursor:pointer;margin:0;padding:0 8px;border:0;border-radius:4px;background:#2e7d32;color:#fff;line-height:20px}
-#${BADGE_ID} button.dbb-more{padding:0;background:none;color:#37a}
-#${BADGE_ID} .dbb-fields{margin:4px 0 2px;padding-top:4px;border-top:1px dashed #e3e3e3;display:grid;grid-template-columns:auto 1fr;gap:0 10px}
-#${BADGE_ID} .dbb-fields b{color:#999;font-weight:400}
-#${BADGE_ID} [hidden]{display:none}`;
-
       const links = result.items
         .map((it) => `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.title)}${it.year ? `(${escapeHtml(it.year)})` : ''}</a>`)
         .join('、');
@@ -767,6 +827,7 @@
       head = '<span>未收录</span>';
     }
 
+    // 字段清单只在要添加时有用（核对将被回填的内容），其余状态不显示。
     let action = '';
     const canAdd = state === 'other' || state === 'absent';
     if (canAdd) {
@@ -780,6 +841,14 @@
 
     const btn = box.querySelector('#dbb-add');
     if (btn) btn.addEventListener('click', () => stashAndOpen(payload));
+    const more = box.querySelector('.dbb-more');
+    if (more) {
+      more.addEventListener('click', () => {
+        const list = box.querySelector('.dbb-fields');
+        list.hidden = !list.hidden;
+        more.textContent = list.hidden ? '字段 ▾' : '字段 ▴';
+      });
+    }
   }
 
   async function runAmazon() {
@@ -787,8 +856,6 @@
     if (!isBookPage()) return; // 非图书商品（电子产品等），静默早退
     const payload = extractAmazonPayload();
     if (!payload.isbn13) {
-    box = document.createElement('div');
-    box.id = BADGE_ID;
       renderBadge('no-isbn', payload, null);
       return;
     }
@@ -825,7 +892,6 @@
     }
     return null;
   }
-    // 字段清单只在要添加时有用（核对将被回填的内容），其余状态不显示。
 
   function fireValue(el, value) {
     el.value = value;
@@ -841,14 +907,6 @@
     return true;
   }
 
-    const more = box.querySelector('.dbb-more');
-    if (more) {
-      more.addEventListener('click', () => {
-        const list = box.querySelector('.dbb-fields');
-        list.hidden = !list.hidden;
-        more.textContent = list.hidden ? '字段 ▾' : '字段 ▴';
-      });
-    }
   function setTextareaByLabel(root, labelText, value) {
     const item = fieldByLabel(root, labelText);
     const el = item && item.querySelector('textarea.textarea_basic');

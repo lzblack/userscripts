@@ -1,0 +1,420 @@
+{
+  "programming-rust-2e": {
+    "pageUrl": "https://www.oreilly.com/library/view/programming-rust-2nd/9781492052586/",
+    "productServiceData": {
+      "data": [
+        {
+          "isbn13": "9781492052593",
+          "title": "Programming Rust",
+          "subtitle": "Fast, Safe Systems Development",
+          "editionLabel": "2nd Edition",
+          "status": {
+            "id": 5,
+            "name": "Out of Print"
+          },
+          "publicationDate": "2021-06-14",
+          "contributors": [
+            {
+              "firstName": "Rachel",
+              "lastName": "Roumeliotis",
+              "role": {
+                "id": 3,
+                "name": "Executive Editor"
+              }
+            },
+            {
+              "firstName": "Jim",
+              "lastName": "Blandy",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "middleName": "",
+              "penName": "",
+              "viewOrder": 1,
+              "biography": "Jim Blandy has been programming since 1981, and writing Free software since 1990. He has been the maintainer of GNU Emacs and GNU Guile, and a maintainer of GDB, the GNU Debugger. He is one of the original designers of the Subversion version control system. Jim now works for Mozilla on Firefox’s web developer tools."
+            },
+            {
+              "firstName": "Jeff",
+              "lastName": "Bleiel",
+              "role": {
+                "id": 2,
+                "name": "Editor"
+              }
+            },
+            {
+              "firstName": "Jeff",
+              "lastName": "Bleiel",
+              "role": {
+                "id": 22,
+                "name": "Project Manager"
+              }
+            },
+            {
+              "firstName": "Jason",
+              "lastName": "Orendorff",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "viewOrder": 2,
+              "biography": "Jason Orendorff hacks C++ for Mozilla, where he is module owner of the JavaScript engine that's in Firefox. He is an active member of the Nashville developer community and an occasional organizer of homegrown tech events. He is interested in grammar, baking, time travel, and helping people learn about complicated topics."
+            },
+            {
+              "firstName": "Cindy",
+              "lastName": "LaNier",
+              "role": {
+                "id": 4,
+                "name": "Assistant Editor"
+              }
+            },
+            {
+              "firstName": "Suzanne",
+              "lastName": "McQuade",
+              "role": {
+                "id": 2,
+                "name": "Editor"
+              },
+              "penName": "Suzanne McQuade"
+            },
+            {
+              "firstName": "Leonora",
+              "lastName": "Tindall",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "middleName": "F. S.",
+              "viewOrder": 3,
+              "biography": "Leonora Tindall is a type system enthusiast and software engineer who uses Rust, Elixir, and other advanced languages to build robust and resilient systems software in high-impact areas like healthcare and data ownership. She works on a variety of open source projects, from genetic algorithms that evolve programs in strange languages to the Rust core libraries and crate ecosystem, and enjoys the experience of contributing to supportive and diverse community projects. In her free time, Leonora builds electronics for audio synthesis and is an avid radio hobbyist, and her love of hardware extends to her software engineering practice as well. She has built applications software for LoRa radios in Rust and Python, and uses software and DIY hardware to create experimental electronic music on a Eurorack synthesizer."
+            }
+          ],
+          "prices": [
+            {
+              "country": {
+                "country": "Canada",
+                "currencyCode": "CAD",
+                "id": "CAN"
+              },
+              "price": 99.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United Kingdom of Great Britain and Northern Ireland",
+                "currencyCode": "EUR",
+                "id": "GBE"
+              },
+              "price": 72.5,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United Kingdom of Great Britain and Northern Ireland",
+                "currencyCode": "GBP",
+                "id": "GBR"
+              },
+              "price": 63.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United States of America",
+                "currencyCode": "USD",
+                "id": "USA"
+              },
+              "price": 79.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "programming-rust-3e": {
+    "pageUrl": "https://www.oreilly.com/library/view/-/9781098176228/",
+    "productServiceData": {
+      "data": [
+        {
+          "isbn13": "9781098176235",
+          "title": "Programming Rust",
+          "subtitle": "Fast, Safe Systems Development",
+          "editionLabel": "3rd Edition",
+          "status": {
+            "id": 1,
+            "name": "In Print"
+          },
+          "publicationDate": "2026-10-16",
+          "contributors": [
+            {
+              "firstName": "Mary",
+              "lastName": "Treseler",
+              "role": {
+                "id": 3,
+                "name": "Executive Editor"
+              }
+            },
+            {
+              "firstName": "Jim",
+              "lastName": "Blandy",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "middleName": "",
+              "penName": "",
+              "viewOrder": 1,
+              "biography": "Jim Blandy has been programming since 1981 and writing free software since 1990. He has worked on GNU Emacs, GNU Guile, and the GNU Debugger, and now works on Firefox at Mozilla."
+            },
+            {
+              "firstName": "Jeff",
+              "lastName": "Bleiel",
+              "role": {
+                "id": 2,
+                "name": "Editor"
+              }
+            },
+            {
+              "firstName": "Jeff",
+              "lastName": "Bleiel",
+              "role": {
+                "id": 22,
+                "name": "Project Manager"
+              }
+            },
+            {
+              "firstName": "Jason",
+              "lastName": "Orendorff",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "viewOrder": 2,
+              "biography": "Jason Orendorff is an experienced systems programmer who’s worked on database tools, search engines, and Firefox’s JavaScript engine. He’s currently working on code search at GitHub."
+            },
+            {
+              "firstName": "Cindy",
+              "lastName": "LaNier",
+              "role": {
+                "id": 4,
+                "name": "Assistant Editor"
+              }
+            },
+            {
+              "firstName": "Leonora",
+              "lastName": "Tindall",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "middleName": "F. S.",
+              "viewOrder": 3,
+              "biography": "Leonora Tindall has been writing Rust since she graduated from Beloit College in 2020, at several software companies, most recently for Fastly, Inc.. She is an enthusiastic user and contributor to free and open source software, including efforts to build free desktop environments, various distributed social media projects, and occasionally Rust itself. Leonora lives in Chicago, Illinois. She enjoys tabletop role-playing games, archery, and prairie cultivation."
+            },
+            {
+              "firstName": "Brian",
+              "lastName": "Guerin",
+              "role": {
+                "id": 2,
+                "name": "Editor"
+              }
+            }
+          ],
+          "prices": [
+            {
+              "country": {
+                "country": "Canada",
+                "currencyCode": "CAD",
+                "id": "CAN"
+              },
+              "price": 99.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United Kingdom of Great Britain and Northern Ireland",
+                "currencyCode": "EUR",
+                "id": "GBE"
+              },
+              "price": 72.5,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United Kingdom of Great Britain and Northern Ireland",
+                "currencyCode": "GBP",
+                "id": "GBR"
+              },
+              "price": 63.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United States of America",
+                "currencyCode": "USD",
+                "id": "USA"
+              },
+              "price": 79.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "from-models-to-money-er": {
+    "pageUrl": "https://www.oreilly.com/library/view/-/0642572328214/",
+    "productServiceData": {
+      "data": [
+        {
+          "isbn13": "9798341674042",
+          "title": "From Models to Money",
+          "subtitle": "A Leaders Guide to Understanding AI Unit Economics and the Total Cost of Intelligence",
+          "editionLabel": "1st Edition",
+          "status": {
+            "id": 2,
+            "name": "Editorial"
+          },
+          "contributors": [
+            {
+              "firstName": "Cindy",
+              "lastName": "LaNier",
+              "role": {
+                "id": 4,
+                "name": "Assistant Editor"
+              }
+            },
+            {
+              "firstName": "Shira",
+              "lastName": "Evans",
+              "role": {
+                "id": 2,
+                "name": "Editor"
+              },
+              "penName": "Shira Evans"
+            },
+            {
+              "firstName": "Shira",
+              "lastName": "Evans",
+              "role": {
+                "id": 22,
+                "name": "Project Manager"
+              },
+              "penName": "Shira Evans"
+            },
+            {
+              "firstName": "David",
+              "lastName": "Michelson",
+              "role": {
+                "id": 2,
+                "name": "Editor"
+              }
+            },
+            {
+              "firstName": "Laura",
+              "lastName": "Baldwin",
+              "role": {
+                "id": 3,
+                "name": "Executive Editor"
+              }
+            },
+            {
+              "firstName": "Davood ",
+              "lastName": "Shamsi",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "viewOrder": 1,
+              "biography": "Davood Shamsi is an experienced Machine Learning leader and public speaker with a demonstrated history of success in both the AI/ML industry and academia, having delivered numerous international keynote speeches at top technology conferences. Skilled in Machine Learning, Big Data Platforms, Mathematical Modeling, Optimization, and modern AI models, with a proven record of strong leadership in developing and delivering innovative products. His works has been published in top conferences such as IEEE/ACM and NeurIPS. Is currently an executive director of AI at JP Morgan Chase. Before that, he was an senior engineering manager for AI/ML at Apple."
+            },
+            {
+              "firstName": "Robert ",
+              "lastName": "Luenberger",
+              "role": {
+                "id": 1,
+                "name": "Author"
+              },
+              "viewOrder": 2,
+              "biography": "Robert Luenberger is an experienced executive and consultant with a deep expertise in machine learning, optimization, and strategic advisory. With a career spanning over two decades, I have successfully led AI-driven initiatives to solve complex business challenges in industries such as media, healthcare, and business intelligence. My work focuses on the application of machine learning models, mathematical optimization, and generative AI to drive innovation, improve efficiency, and deliver measurable results.\n<p>\nPreviously, as Senior Vice President and Chief Scientist at Verizon/AOL Platforms, I led a team of over 60 professionals in developing algorithms that optimized advertising campaigns across multiple platforms including mobile, video, and TV. I have a proven track record of building high-performing teams, fostering collaboration across departments, and maintaining a strong connection between academic research and industry application"
+            }
+          ],
+          "prices": [
+            {
+              "country": {
+                "country": "Canada",
+                "currencyCode": "CAD",
+                "id": "CAN"
+              },
+              "price": 56.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United Kingdom of Great Britain and Northern Ireland",
+                "currencyCode": "EUR",
+                "id": "GBE"
+              },
+              "price": 41,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United Kingdom of Great Britain and Northern Ireland",
+                "currencyCode": "GBP",
+                "id": "GBR"
+              },
+              "price": 35.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            },
+            {
+              "country": {
+                "country": "United States of America",
+                "currencyCode": "USD",
+                "id": "USA"
+              },
+              "price": 44.99,
+              "priceType": {
+                "id": "01",
+                "priceTypeDesc": "RRP excluding tax"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

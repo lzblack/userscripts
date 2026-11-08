@@ -21,17 +21,17 @@
 - 多作者自动加行（人物实体关联栏按豆瓣规范留空）。
 - 跨标签数据走本地存储传递，10 分钟过期、消费即删。
 - 不支持 Kindle / 电子版（无 ISBN，会提示切到纸质版）。
-- O'Reilly：书目全取页面 JSON-LD，其中的 `isbn` 是纸书 ISBN（页面 URL 里的是电子版 ISBN，豆瓣不收）。O'Reilly 只卖电子版，定价与装帧留空由你补填；页面没有作者简介。出版日期是电子版上架日，可能比纸书早几周。
+- O'Reilly：书目取页面 JSON-LD，其中的 `isbn` 是纸书 ISBN（页面 URL 里的是电子版 ISBN，豆瓣不收）；副标题、作者简介（只取作者，不含编辑）和美国标价取页面里同一 ISBN 的商品记录。O'Reilly 只卖电子版，装帧留空由你补填。出版日期是电子版上架日，可能比纸书早几周。
 
 ## 开发
 
-- 纯函数解析层（ISBN 校验/转换、标题拆分、日期/定价/装帧/页数归一化、O'Reilly JSON-LD 解析、回填计划）有 `node --test` 单测：
+- 纯函数解析层（ISBN 校验/转换、标题拆分、日期/定价/装帧/页数归一化、O'Reilly JSON-LD 与商品记录解析、回填计划）有 `node --test` 单测：
 
   ```sh
   node --test douban-add-book.test.js
   ```
 
-- O'Reilly 解析的测试数据是从书页原样抓下的 JSON-LD（`fixture-oreilly.json`）。
+- O'Reilly 解析的测试数据是从书页原样抓下的 JSON-LD（`fixture-oreilly.json`）和商品记录（`fixture-oreilly-product.json`，只留用到的字段）。
 - DOM 回填与封面注入用 `fixture-step1.html` / `fixture-step2.html` / `fixture-cover.html` 离线复现验证。
 - 无构建步骤，单文件 IIFE；纯函数与运行期共用同一文件，靠 `module.exports` 守卫区分 node 与浏览器。
 
