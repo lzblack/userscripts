@@ -19,7 +19,9 @@ const {
   buildFillPlan,
   isBookCategory,
   isAmazonHost,
+  parseOreillyLd,
 } = require('./douban-add-book.user.js');
+const OREILLY = require('./fixture-oreilly.json');
 
 const SAPIENS = {
   title: 'Sapiens',
@@ -338,4 +340,70 @@ test('buildFillPlan: unknown binding (null) is skipped, not guessed', () => {
   assert.ok(plan.skipped.includes('装帧'));
   assert.ok(!plan.filled.includes('装帧'));
   assert.ok(!plan.warnings.some((w) => w.includes('装帧')));
+});
+
+// ── parseDate: ISO ───────────────────────────────────────────────────────────
+test('parseDate: ISO 8601 date (JSON-LD datePublished)', () => {
+  assert.deepEqual(parseDate('2021-06-14'), { y: 2021, m: 6, d: 14 });
+  assert.deepEqual(parseDate('2021-06'), { y: 2021, m: 6, d: null });
+});
+
+// ── parseOreillyLd ───────────────────────────────────────────────────────────
+// fixture-oreilly.json 是 2026-11-08 从 www.oreilly.com 书页原样抓下的 JSON-LD。
+test('parseOreillyLd: Programming Rust 2e — print ISBN, not the ebook ISBN in the URL', () => {
+  const b = parseOreillyLd(OREILLY['programming-rust-2e'].ld);
+  assert.equal(b.isbn13, '9781492052593'); // 页面 URL / og:book:isbn 是电子版 9781492052586
+  assert.equal(b.title, 'Programming Rust, 2nd Edition');
+  assert.equal(b.subtitle, '');
+  assert.deepEqual(b.authors, ['Jim Blandy', 'Jason Orendorff', 'Leonora F. S. Tindall']);
+  assert.equal(b.publisher, "O'Reilly Media, Inc.");
+  assert.deepEqual(b.pubDate, { y: 2021, m: 6, d: 14 });
+  assert.equal(b.pageCount, 738);
+  assert.match(b.description, /^Systems programming provides/);
+  assert.equal(b.coverUrl, 'https://www.oreilly.com/library/cover/9781492052586/1200w/');
+});
+
+test('parseOreillyLd: Programming Rust 3e', () => {
+  const b = parseOreillyLd(OREILLY['programming-rust-3e'].ld);
+  assert.equal(b.isbn13, '9781098176235');
+  assert.equal(b.title, 'Programming Rust, 3rd Edition');
+  assert.deepEqual(b.pubDate, { y: 2026, m: 10, d: 22 });
+  assert.equal(b.pageCount, 730);
+  assert.equal(b.coverUrl, 'https://www.oreilly.com/library/cover/9781098176228/1200w/');
+});
+
+test('parseOreillyLd: title with a colon splits into title/subtitle', () => {
+  const ld = JSON.stringify({ '@type': 'Book', name: 'Learning Go: An Idiomatic Approach', isbn: '9781492077213' });
+  const b = parseOreillyLd([ld]);
+  assert.equal(b.title, 'Learning Go');
+  assert.equal(b.subtitle, 'An Idiomatic Approach');
+});
+
+test('parseOreillyLd: invalid or missing isbn → null (caller blocks)', () => {
+  assert.equal(parseOreillyLd([JSON.stringify({ '@type': 'Book', name: 'X', isbn: '9781492052594' })]).isbn13, null);
+  assert.equal(parseOreillyLd([JSON.stringify({ '@type': 'Book', name: 'X' })]).isbn13, null);
+});
+
+test('parseOreillyLd: finds the Book among other blocks, arrays and @graph; skips bad JSON', () => {
+  const book = { '@type': 'Book', name: 'X', isbn: '9781492052593' };
+  const org = JSON.stringify({ '@type': 'Organization', name: 'O' });
+  assert.equal(parseOreillyLd(['{not json', org, JSON.stringify(book)]).title, 'X');
+  assert.equal(parseOreillyLd([JSON.stringify([{ '@type': 'WebPage' }, book])]).title, 'X');
+  assert.equal(parseOreillyLd([JSON.stringify({ '@graph': [book] })]).title, 'X');
+  assert.equal(parseOreillyLd([JSON.stringify({ ...book, '@type': ['Book', 'Product'] })]).title, 'X');
+});
+
+test('parseOreillyLd: no Book block → null', () => {
+  assert.equal(parseOreillyLd([]), null);
+  assert.equal(parseOreillyLd([JSON.stringify({ '@type': 'Organization' })]), null);
+});
+
+test('parseOreillyLd: missing fields degrade to empty values, never throw', () => {
+  const b = parseOreillyLd([JSON.stringify({ '@type': 'Book', name: 'X', publisher: 'P', author: { name: 'A' } })]);
+  assert.equal(b.publisher, 'P');
+  assert.deepEqual(b.authors, ['A']);
+  assert.deepEqual(b.pubDate, { y: null, m: null, d: null });
+  assert.equal(b.pageCount, null);
+  assert.equal(b.description, '');
+  assert.equal(b.coverUrl, '');
 });

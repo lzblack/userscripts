@@ -72,9 +72,11 @@
     return { title: s.slice(0, idx).trim(), subtitle: s.slice(idx + 1).trim() };
   }
 
-  /** 解析 "March 5, 2024" / "Mar 2024" / "2024" → {y,m,d}（缺位为 null）；无年份返回 null。 */
+  /** 解析 "March 5, 2024" / "Mar 2024" / "2024" / "2024-03-05" → {y,m,d}（缺位为 null）；无年份返回 null。 */
   function parseDate(input) {
     const s = str(input).trim();
+    const iso = s.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?/);
+    if (iso) return { y: Number(iso[1]), m: Number(iso[2]), d: iso[3] ? Number(iso[3]) : null };
     const ym = s.match(/([A-Za-z]{3,})[^0-9A-Za-z]+(?:(\d{1,2})[^0-9A-Za-z]+)?(\d{4})/);
     if (ym) {
       const mon = MONTHS[ym[1].slice(0, 3).toLowerCase()];
@@ -154,6 +156,47 @@
   /** 美国站的两个主机名：us.amazon.com 是别名，直接返回同一商品页、不跳转 www。 */
   function isAmazonHost(host) {
     return host === 'www.amazon.com' || host === 'us.amazon.com';
+  }
+
+  /** 在 JSON-LD 文本块里找 @type 含 Book 的对象（兼容数组与 @graph）；坏 JSON 跳过。 */
+  function findLdBook(ldTexts) {
+    const isBook = (o) => o && typeof o === 'object' && [].concat(o['@type']).includes('Book');
+    for (const text of ldTexts || []) {
+      let data;
+      try { data = JSON.parse(text); } catch { continue; }
+      const nodes = [].concat(data).flatMap((o) => (o && Array.isArray(o['@graph']) ? o['@graph'] : [o]));
+      const book = nodes.find(isBook);
+      if (book) return book;
+    }
+    return null;
+  }
+
+  /**
+   * 纯函数：O'Reilly 书页 JSON-LD → payload 的书目字段；无 Book 块返回 null。
+   * JSON-LD 的 isbn 是纸书 ISBN（9781492052593），页面 URL 与 og:book:isbn 是电子版
+   * （…586）——豆瓣条目按纸书收录，所以只认 isbn 字段。封面按电子版 id 取 1200w 大图
+   * （image 给的是 250w 缩略图；1200w 实测 1200×1575 JPEG）。
+   */
+  function parseOreillyLd(ldTexts) {
+    const b = findLdBook(ldTexts);
+    if (!b) return null;
+    const { title, subtitle } = splitTitle(b.name);
+    const isbn = str(b.isbn).replace(/[^0-9]/g, '');
+    const nameOf = (v) => str(v && typeof v === 'object' ? v.name : v).trim();
+    const pages = Number(b.numberOfPages);
+    const image = str(b.image && typeof b.image === 'object' ? b.image.url : b.image);
+    const coverId = image.match(/\/library\/cover\/(\d+)\//);
+    return {
+      title,
+      subtitle,
+      authors: [].concat(b.author || []).map(nameOf).filter(Boolean),
+      isbn13: validateIsbn13(isbn) ? isbn : null,
+      publisher: nameOf(b.publisher),
+      pubDate: parseDate(b.datePublished) || { y: null, m: null, d: null },
+      pageCount: Number.isInteger(pages) && pages > 0 ? pages : null,
+      description: str(b.description).trim(),
+      coverUrl: coverId ? `https://www.oreilly.com/library/cover/${coverId[1]}/1200w/` : '',
+    };
   }
 
   /** 剥掉 Amazon 简介尾部的展开切换文案（"Read more" / "Read less"）。 */
@@ -261,7 +304,7 @@
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
       normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, descriptionBlockText, isPayloadFresh,
-      bindingRadioValue, buildFillPlan, isBookCategory, isAmazonHost,
+      bindingRadioValue, buildFillPlan, isBookCategory, isAmazonHost, parseOreillyLd,
     };
     return;
   }
