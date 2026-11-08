@@ -3,7 +3,7 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.2.0
+// @version      1.2.1
 // @author       lzblack
 // @description  在 Amazon / O'Reilly 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
@@ -747,24 +747,25 @@
 
   const BADGE_ID = 'dbb-badge';
 
-  // 一行胶囊，Amazon / O'Reilly 同一套样式；字段清单默认折叠。字体、颜色、链接样式都显式
-  // 指定，不继承来源站（O'Reilly 的链接是红色大字、标题字体也不同）。
+  // 一行，Amazon / O'Reilly 同一套 CSS。不自带底色：文字颜色与字体继承所在页面，深色头图上
+  // 是浅字、白底页面上是深字，看起来是页面的一部分；状态靠字重和透明度区分，不靠固定配色
+  // （固定的绿/红在 O'Reilly 深色背景上读不清）。字号、行高、间距固定，不随挂载点变。
   const BADGE_CSS = `
-#${BADGE_ID}{display:block;width:fit-content;max-width:100%;margin:8px 0;padding:4px 10px;
-  border:1px solid #dcdcdc;border-radius:6px;background:#fff;color:#333;
-  font:12px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:normal;text-transform:none;text-align:left}
-#${BADGE_ID} *{font:inherit;box-sizing:border-box}
-#${BADGE_ID} .dbb-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
-#${BADGE_ID} .dbb-tag{color:#999}
-#${BADGE_ID} .dbb-ok{color:#2e7d32;font-weight:600}
-#${BADGE_ID} .dbb-warn{color:#b8860b;font-weight:600}
-#${BADGE_ID} .dbb-bad{color:#c0392b;font-weight:600}
-#${BADGE_ID} a{color:#37a;text-decoration:none}
-#${BADGE_ID} a:hover{text-decoration:underline}
-#${BADGE_ID} button{cursor:pointer;margin:0;padding:0 8px;border:0;border-radius:4px;background:#2e7d32;color:#fff;line-height:20px}
-#${BADGE_ID} button.dbb-more{padding:0;background:none;color:#37a}
-#${BADGE_ID} .dbb-fields{margin:4px 0 2px;padding-top:4px;border-top:1px dashed #e3e3e3;display:grid;grid-template-columns:auto 1fr;gap:0 10px}
-#${BADGE_ID} .dbb-fields b{color:#999;font-weight:400}
+#${BADGE_ID}{display:block;width:fit-content;max-width:100%;margin:8px 0;padding:0;border:0;background:none;
+  color:inherit;font-family:inherit;font-size:13px;font-weight:400;line-height:1.6;letter-spacing:normal;text-transform:none;text-align:left}
+#${BADGE_ID} *{font:inherit;color:inherit;box-sizing:border-box}
+#${BADGE_ID} .dbb-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+#${BADGE_ID} .dbb-tag{opacity:.65}
+#${BADGE_ID} .dbb-ok,#${BADGE_ID} .dbb-warn,#${BADGE_ID} .dbb-bad{font-weight:600}
+#${BADGE_ID} .dbb-bad::before{content:"⚠ "}
+#${BADGE_ID} a{text-decoration:underline;text-underline-offset:2px}
+#${BADGE_ID} button{cursor:pointer;margin:0;padding:0 10px;border:1px solid currentColor;border-radius:4px;background:none;line-height:20px}
+#${BADGE_ID} button:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
+#${BADGE_ID} button.dbb-more{padding:0;border:0;background:none;opacity:.65}
+#${BADGE_ID} button.dbb-more:hover{opacity:1}
+#${BADGE_ID} .dbb-fields{margin:6px 0 2px;padding-top:6px;border-top:1px solid color-mix(in srgb,currentColor 25%,transparent);
+  display:grid;grid-template-columns:auto 1fr;gap:0 12px}
+#${BADGE_ID} .dbb-fields b{opacity:.65}
 #${BADGE_ID} [hidden]{display:none}`;
 
   function fieldSummaryHtml(p) {
