@@ -33,7 +33,7 @@
 
 ## 权限与隐私
 
-- `@match` 仅 `www.amazon.com` 与 `book.douban.com/new_subject`；Amazon 上的非图书页静默退出，不干扰。
+- `@match` 仅 `www.amazon.com`（含别名 `us.amazon.com`）与 `book.douban.com/new_subject`；Amazon 上的非图书页静默退出，不干扰。
 - `@connect book.douban.com`：用你的豆瓣登录态查询某 ISBN 是否已收录（登录态也是绕开风控的必要条件）。**仅读取公开收录信息，不做任何写操作。**
 - `@connect media-amazon.com / ssl-images-amazon.com`：抓取封面图。
 - **不接入任何第三方或分析服务，不上传你的任何数据**；跨标签传递的数据只存在本地 Tampermonkey 存储，用完即删。

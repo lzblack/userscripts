@@ -35,7 +35,7 @@
 
 ## 权限与隐私
 
-- `@match` 仅 `www.amazon.com` 与 `book.douban.com/new_subject`；Amazon 上非图书页静默退出。
+- `@match` 仅 `www.amazon.com`（含别名 `us.amazon.com`）与 `book.douban.com/new_subject`；Amazon 上非图书页静默退出。
 - `@connect book.douban.com`：用你的登录态查询 ISBN 是否收录（只读，不做任何写操作）。
 - `@connect media-amazon.com / ssl-images-amazon.com`：抓取封面图。
 - 不上传任何数据、不接入第三方或分析服务。

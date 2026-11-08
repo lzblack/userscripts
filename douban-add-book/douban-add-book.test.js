@@ -18,6 +18,7 @@ const {
   bindingRadioValue,
   buildFillPlan,
   isBookCategory,
+  isAmazonHost,
 } = require('./douban-add-book.user.js');
 
 const SAPIENS = {
@@ -123,6 +124,19 @@ test('mapBinding: hardcover / paperback / other', () => {
   assert.equal(mapBinding('Kindle Edition'), 'other');
   assert.equal(mapBinding('Board book'), 'other');
   assert.equal(mapBinding(''), 'other');
+});
+
+// ── isAmazonHost ─────────────────────────────────────────────────────────────
+// us.amazon.com 是美国站别名：直接 200 返回同一商品页（#dp.book），不跳转 www。
+test('isAmazonHost: www and us aliases of the US store', () => {
+  assert.equal(isAmazonHost('www.amazon.com'), true);
+  assert.equal(isAmazonHost('us.amazon.com'), true);
+});
+
+test('isAmazonHost: other hosts are not Amazon pages', () => {
+  assert.equal(isAmazonHost('book.douban.com'), false);
+  assert.equal(isAmazonHost('www.amazon.co.uk'), false);
+  assert.equal(isAmazonHost(''), false);
 });
 
 // ── isBookCategory ────────────────────────────────────────────────────────────

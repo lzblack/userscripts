@@ -3,10 +3,11 @@
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
 // @supportURL   https://github.com/lzblack/userscripts/issues
-// @version      1.0.6
+// @version      1.0.7
 // @author       lzblack
 // @description  在 Amazon 图书页查豆瓣是否收录；未收录则一键跳转「添加书籍」流程、自动回填全字段并注入封面。人工只审核和提交。
 // @match        https://www.amazon.com/*
+// @match        https://us.amazon.com/*
 // @match        https://book.douban.com/new_subject*
 // @connect      book.douban.com
 // @connect      media-amazon.com
@@ -150,6 +151,11 @@
     return false;
   }
 
+  /** 美国站的两个主机名：us.amazon.com 是别名，直接返回同一商品页、不跳转 www。 */
+  function isAmazonHost(host) {
+    return host === 'www.amazon.com' || host === 'us.amazon.com';
+  }
+
   /** 剥掉 Amazon 简介尾部的展开切换文案（"Read more" / "Read less"）。 */
   function cleanDescription(input) {
     return str(input).replace(/\s*\bRead (?:more|less)\s*$/i, '').trim();
@@ -250,7 +256,7 @@
     module.exports = {
       validateIsbn13, isbn10to13, splitTitle, parseDate, splitPublisherDate,
       normalizePrice, mapBinding, normalizeTitle, parsePageCount, cleanDescription, descriptionBlockText, isPayloadFresh,
-      bindingRadioValue, buildFillPlan, isBookCategory,
+      bindingRadioValue, buildFillPlan, isBookCategory, isAmazonHost,
     };
     return;
   }
@@ -938,7 +944,7 @@
   // ============================================================
 
   const host = location.hostname;
-  if (host === 'www.amazon.com') {
+  if (isAmazonHost(host)) {
     runAmazon();
   } else if (host === 'book.douban.com') {
     runDouban();
