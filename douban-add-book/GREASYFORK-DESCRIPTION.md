@@ -57,3 +57,4 @@
 - [豆瓣书名号转搜索链接](https://greasyfork.org/zh-CN/scripts/558844) — 《书名号》转可点击的豆瓣搜索链接
 - [豆瓣一键添游戏](https://greasyfork.org/zh-CN/scripts/591798) — 在 Steam 商店页一键把游戏加进豆瓣（查重 + 自动回填 + 封面）
 - [豆仓：豆瓣书影音标记备份](https://greasyfork.org/zh-CN/scripts/602023) — 一次导出全部书影音游戏舞台剧标记（含私密），可导入 NeoDB
+- [豆瓣移动版转桌面版](https://greasyfork.org/zh-CN/scripts/605544) — Google 搜索结果里的豆瓣移动版链接直接换成桌面版

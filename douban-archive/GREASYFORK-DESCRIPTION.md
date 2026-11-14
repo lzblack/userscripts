@@ -63,3 +63,4 @@
 - [豆瓣读书版本标记提示](https://greasyfork.org/zh-CN/scripts/572604) — 提示你标记过同一作品的其他版本
 - [豆瓣一键添书](https://greasyfork.org/zh-CN/scripts/582130) — 从 Amazon / O'Reilly 图书页一键加书到豆瓣
 - [豆瓣一键添游戏](https://greasyfork.org/zh-CN/scripts/591798) — 从 Steam 商店页一键加游戏到豆瓣
+- [豆瓣移动版转桌面版](https://greasyfork.org/zh-CN/scripts/605544) — Google 搜索结果里的豆瓣移动版链接直接换成桌面版
