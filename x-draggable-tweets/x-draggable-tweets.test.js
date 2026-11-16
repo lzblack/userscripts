@@ -55,6 +55,16 @@ test('skips excluded ids (quote card must not resolve to the outer tweet)', () =
   assert.equal(pickStatusUrl(['/outer/status/1', '/quoted/status/2'], ['1'], BASE), 'https://x.com/quoted/status/2');
 });
 
+test('real quote-card fiber shape (2026-11): string `link` prop on twitter.com', () => {
+  // Logged-in home timeline: depths 1–9 of the quote card's fiber chain all
+  // carry this same absolute twitter.com URL; the page is on x.com.
+  const fiber = Array(7).fill('https://twitter.com/littmath/status/2122337220883562698');
+  assert.equal(
+    pickStatusUrl(fiber, ['2122190429148135889'], BASE),
+    'https://x.com/littmath/status/2122337220883562698',
+  );
+});
+
 test('returns null when nothing qualifies', () => {
   assert.equal(pickStatusUrl(['/outer/status/1'], ['1'], BASE), null);
   assert.equal(pickStatusUrl([], [], BASE), null);
