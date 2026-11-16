@@ -76,6 +76,11 @@ test('alt+click is forwarded: on a native <a> it would download the page instead
   assert.equal(shouldForwardClick({ button: 0, altKey: true }), true);
 });
 
+test('keyboard-activated clicks (detail 0, no pointer position) are never forwarded', () => {
+  assert.equal(shouldForwardClick({ button: 0, detail: 0 }), false);
+  assert.equal(shouldForwardClick({ button: 0, detail: 1 }), true);
+});
+
 test('non-left buttons are never forwarded', () => {
   assert.equal(shouldForwardClick({ button: 1 }), false);
   assert.equal(shouldForwardClick({ button: 2 }), false);

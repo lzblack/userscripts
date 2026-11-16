@@ -53,9 +53,10 @@
 
   // Ctrl/Meta/Shift-click and non-left buttons stay on the overlay <a>, so the
   // browser opens the tweet in a new tab/window natively. Alt is forwarded:
-  // alt+click on a native link downloads it.
+  // alt+click on a native link downloads it. Keyboard-activated clicks
+  // (detail 0) carry no pointer position, so there is nothing to forward to.
   function shouldForwardClick(e) {
-    return e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+    return e.button === 0 && e.detail !== 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey;
   }
 
   if (typeof module !== "undefined" && module.exports) {
@@ -134,6 +135,8 @@
     const overlay = document.createElement("a");
     overlay.href = url;
     overlay.draggable = true;
+    overlay.tabIndex = -1; // pointer-only: keep it out of the Tab order
+    overlay.setAttribute("aria-hidden", "true");
     overlay.className = "x-drag-overlay";
     overlay.style.cssText = "position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;";
 
