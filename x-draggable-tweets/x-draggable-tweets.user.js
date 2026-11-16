@@ -2,7 +2,7 @@
 // @name         X.com Draggable Tweets
 // @namespace    https://github.com/lzblack
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      1.0.2
+// @version      1.1.0
 // @author       lzblack
 // @description  Make entire tweet cards draggable as real links (works with Glitter Drag)
 // @match        https://x.com/*
@@ -19,71 +19,155 @@
 (function () {
   "use strict";
 
-  const INTERACTIVE =
-    'a, button, [role="button"], [role="link"], input, textarea, video, ' +
-    '[data-testid="like"], [data-testid="retweet"], [data-testid="reply"], ' +
-    '[data-testid="bookmark"], [data-testid="caret"], [data-testid="tweetPhoto"]';
+  // ── Pure logic ──────────────────────────────────────────────────────────────
 
-  function getStatusKey(url) {
-    const m = url.match(/\/([^/]+)\/status\/(\d+)/);
-    return m ? `${m[1]}/status/${m[2]}` : null;
+  // /{user}/status/{id}[/anything] or /i/web/status/{id}
+  const STATUS_PATH = /^\/(?:([A-Za-z0-9_]{1,15})|i\/web)\/status\/(\d+)(?:\/|$)/;
+  const X_HOSTS = /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/;
+
+  // Any status-ish href → { id, url } with url = canonical tweet URL on the
+  // page's origin (no /analytics, /photo/1, query or hash). null if not a tweet.
+  function parseStatus(href, base) {
+    if (typeof href !== "string" || !href) return null;
+    let u;
+    try {
+      u = new URL(href, base);
+    } catch {
+      return null;
+    }
+    if (!X_HOSTS.test(u.hostname)) return null;
+    const m = u.pathname.match(STATUS_PATH);
+    if (!m) return null;
+    const path = m[1] ? `/${m[1]}/status/${m[2]}` : `/i/web/status/${m[2]}`;
+    return { id: m[2], url: new URL(base).origin + path };
   }
 
-  // Primary: extract URL from <a href="/user/status/id"> inside the element
-  function getTweetURL(el) {
-    const timeLink = el.querySelector('a[href*="/status/"] time');
-    if (timeLink) return timeLink.closest("a").href;
-    const link = el.querySelector('a[href*="/status/"]');
-    return link ? link.href : null;
-  }
-
-  // Fallback: extract URL from React fiber (for div[role="link"] quote cards)
-  function getURLFromFiber(el) {
-    const key = Object.keys(el).find(
-      (k) =>
-        k.startsWith("__reactFiber$") ||
-        k.startsWith("__reactInternalInstance$"),
-    );
-    if (!key) return null;
-    let fiber = el[key];
-    for (let i = 0; i < 30 && fiber; i++) {
-      const p = fiber.memoizedProps || fiber.pendingProps;
-      if (p) {
-        for (const prop of ["href", "to"]) {
-          if (typeof p[prop] === "string" && p[prop].includes("/status/")) {
-            return new URL(p[prop], location.origin).href;
-          }
-        }
-      }
-      fiber = fiber.return;
+  // First candidate that is a tweet whose id is not excluded.
+  function pickStatusUrl(candidates, excludeIds, base) {
+    for (const c of candidates) {
+      const s = parseStatus(c, base);
+      if (s && !excludeIds.includes(s.id)) return s.url;
     }
     return null;
   }
 
-  function addOverlay(target, url) {
-    if (target.dataset.xDragTarget) return;
-    target.dataset.xDragTarget = "1";
+  // Ctrl/Meta/Shift-click and non-left buttons stay on the overlay <a>, so the
+  // browser opens the tweet in a new tab/window natively. Alt is forwarded:
+  // alt+click on a native link downloads it.
+  function shouldForwardClick(e) {
+    return e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+  }
 
-    const cs = getComputedStyle(target);
-    if (cs.position === "static") target.style.position = "relative";
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { parseStatus, pickStatusUrl, shouldForwardClick };
+    return;
+  }
+
+  // ── DOM ─────────────────────────────────────────────────────────────────────
+
+  // Hovering any of these keeps the overlay off, so X (or the browser) handles
+  // them natively. tweetText is here so tweet text stays selectable.
+  const PASSTHROUGH =
+    'a, button, [role="button"], [role="link"], input, textarea, video, ' +
+    '[data-testid="tweetText"], [data-testid="tweetPhoto"]';
+
+  // A quote card is a div[role=link] that renders a tweet.
+  const QUOTE_CARD = 'div[role="link"]';
+  const QUOTE_MARK = '[data-testid="Tweet-User-Avatar"], [data-testid="tweetText"]';
+
+  const base = () => location.origin;
+  const pageStatusId = () => {
+    const s = parseStatus(location.pathname, base());
+    return s ? s.id : null;
+  };
+
+  // A tweet's own link is the <a> around its <time>.
+  function articleUrl(article) {
+    const time = article.querySelector('a[href*="/status/"] time');
+    const s = time && parseStatus(time.closest("a").getAttribute("href"), base());
+    return s ? s.url : null;
+  }
+
+  // Quote cards contain no status <a>; their target lives in React props.
+  // Collect every status-ish string up the fiber chain; callers exclude the
+  // outer tweet's id so the walk cannot resolve to it.
+  function fiberCandidates(el) {
+    const key = Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
+    const out = [];
+    let fiber = key ? el[key] : null;
+    for (let i = 0; i < 30 && fiber; i++, fiber = fiber.return) {
+      const p = fiber.memoizedProps;
+      if (!p || typeof p !== "object") continue;
+      for (const prop of ["href", "to", "link"]) {
+        const v = p[prop];
+        if (typeof v === "string") out.push(v);
+        else if (v && typeof v === "object" && typeof v.pathname === "string") out.push(v.pathname);
+      }
+    }
+    return out;
+  }
+
+  function quoteUrl(card, excludeIds) {
+    return pickStatusUrl(fiberCandidates(card), excludeIds, base());
+  }
+
+  function idOf(url) {
+    const s = parseStatus(url, base());
+    return s ? s.id : null;
+  }
+
+  // Resolved fresh on hover and on dragstart: X recycles DOM nodes.
+  function resolveUrl(target) {
+    if (target.tagName === "ARTICLE") return articleUrl(target);
+    const article = target.closest("article");
+    const outer = article && articleUrl(article);
+    return quoteUrl(target, [idOf(outer), pageStatusId()].filter(Boolean));
+  }
+
+  let decorated = new WeakSet();
+
+  function addOverlay(target, url) {
+    decorated.add(target);
+    target.dataset.xDragTarget = "1";
+    if (getComputedStyle(target).position === "static") target.style.position = "relative";
 
     const overlay = document.createElement("a");
     overlay.href = url;
     overlay.draggable = true;
     overlay.className = "x-drag-overlay";
-    overlay.style.cssText =
-      "position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;";
+    overlay.style.cssText = "position:absolute;inset:0;z-index:1;opacity:0;pointer-events:none;";
 
+    // X never sees clicks on the overlay itself: its root handler would
+    // preventDefault them and navigate in place. Modifier and middle clicks
+    // then fall through to the browser's own link handling (new tab/window).
+    overlay.addEventListener("auxclick", (e) => e.stopPropagation());
     overlay.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!shouldForwardClick(e)) return;
       e.preventDefault();
       overlay.style.pointerEvents = "none";
       const below = document.elementFromPoint(e.clientX, e.clientY);
-      overlay.style.pointerEvents = "";
-      if (below) below.click();
+      if (!below) return;
+      below.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: window,
+          detail: e.detail,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          altKey: e.altKey,
+          button: 0,
+          buttons: e.buttons,
+        }),
+      );
     });
 
     overlay.addEventListener("dragstart", () => {
-      const fresh = getTweetURL(target) || getURLFromFiber(target);
+      const fresh = resolveUrl(target);
       if (fresh) overlay.href = fresh;
     });
 
@@ -91,99 +175,77 @@
   }
 
   function process() {
-    const pageKey = getStatusKey(location.pathname);
+    const pageId = pageStatusId();
+    for (const article of document.querySelectorAll("article")) {
+      const url = articleUrl(article);
+      if (!url) continue; // not rendered yet; retried on the next mutation
 
-    document.querySelectorAll("article").forEach((article) => {
-      if (article.dataset.xDrag) return;
-      article.dataset.xDrag = "1";
+      // The focal tweet on its own status page is not draggable itself.
+      if (!decorated.has(article) && idOf(url) !== pageId) addOverlay(article, url);
 
-      const url = getTweetURL(article);
-      if (!url) return;
-
-      const isFocal = pageKey && getStatusKey(url) === pageKey;
-
-      if (!isFocal) {
-        // Timeline tweet or reply -- whole article is draggable
-        addOverlay(article, url);
-      } else {
-        // Focal tweet: find quoted tweet cards inside
-        // They are div[role="link"] containing tweet content
-        article.querySelectorAll('div[role="link"]').forEach((card) => {
-          if (card.dataset.xDragTarget) return;
-          // Must contain tweet-like content (avatar or tweet text)
-          if (
-            !card.querySelector(
-              '[data-testid="Tweet-User-Avatar"], [data-testid="tweetText"]',
-            )
-          )
-            return;
-          const cardURL = getTweetURL(card) || getURLFromFiber(card);
-          if (!cardURL) return;
-          // Must point to a different tweet
-          const cardKey = getStatusKey(cardURL);
-          if (cardKey && cardKey !== pageKey) {
-            addOverlay(card, cardURL);
-          }
-        });
+      for (const card of article.querySelectorAll(QUOTE_CARD)) {
+        if (decorated.has(card) || !card.querySelector(QUOTE_MARK)) continue;
+        if (card.closest("article") !== article) continue; // belongs to a nested article
+        const q = quoteUrl(card, [idOf(url), pageId].filter(Boolean));
+        if (q) addOverlay(card, q);
       }
-    });
+    }
   }
 
-  function cleanup() {
+  function reset() {
     document.querySelectorAll(".x-drag-overlay").forEach((el) => el.remove());
-    document
-      .querySelectorAll("[data-x-drag]")
-      .forEach((el) => delete el.dataset.xDrag);
-    document
-      .querySelectorAll("[data-x-drag-target]")
-      .forEach((el) => delete el.dataset.xDragTarget);
+    document.querySelectorAll("[data-x-drag-target]").forEach((el) => delete el.dataset.xDragTarget);
+    decorated = new WeakSet();
   }
 
-  // Single global mousemove -- toggle overlay pointer-events
-  let raf = 0;
-  let activeOverlay = null;
+  // ── Overlay activation: one global mousemove, at most once per frame ────────
+
+  let moveRaf = 0;
+  let active = null;
 
   document.addEventListener(
     "mousemove",
     (e) => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-
-        if (activeOverlay) {
-          activeOverlay.style.pointerEvents = "none";
-          activeOverlay = null;
-        }
+      if (moveRaf) return;
+      moveRaf = requestAnimationFrame(() => {
+        moveRaf = 0;
+        if (active) active.style.pointerEvents = "none";
+        active = null;
 
         const el = document.elementFromPoint(e.clientX, e.clientY);
-        if (!el) return;
-
-        const target = el.closest("[data-x-drag-target]");
+        const target = el && el.closest("[data-x-drag-target]");
         if (!target) return;
-
         const overlay = target.querySelector(":scope > .x-drag-overlay");
         if (!overlay) return;
 
-        // Over interactive element (that isn't the target itself) -> keep overlay off
-        const inter = el.closest(INTERACTIVE);
-        if (inter && inter !== target && target.contains(inter)) return;
+        // Over something X handles itself (or tweet text) → leave it native.
+        const pass = el.closest(PASSTHROUGH);
+        if (pass && pass !== target && target.contains(pass)) return;
 
+        const fresh = resolveUrl(target);
+        if (fresh) overlay.href = fresh;
         overlay.style.pointerEvents = "";
-        activeOverlay = overlay;
+        active = overlay;
       });
     },
     true,
   );
 
-  // SPA navigation
+  // ── SPA navigation + lazy rendering, coalesced to one pass per frame ────────
+
   let lastPath = location.pathname;
-  const observer = new MutationObserver(() => {
-    if (location.pathname !== lastPath) {
-      lastPath = location.pathname;
-      cleanup();
-    }
-    process();
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
+  let scanRaf = 0;
+  new MutationObserver(() => {
+    if (scanRaf) return;
+    scanRaf = requestAnimationFrame(() => {
+      scanRaf = 0;
+      if (location.pathname !== lastPath) {
+        lastPath = location.pathname;
+        reset();
+      }
+      process();
+    });
+  }).observe(document.body, { childList: true, subtree: true });
+
   process();
 })();

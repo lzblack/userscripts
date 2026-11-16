@@ -1,0 +1,69 @@
+<!doctype html>
+<!--
+  Behavioural fixture for x-draggable-tweets. Structure mirrors a logged-in x.com
+  home timeline dump (2026-11): article[data-testid=tweet] with the tweet's own
+  link around <time>, a /analytics link, and a quote card div[role=link] that has
+  NO status <a> (its target only exists in React props, faked below as a fiber).
+  Must be served from an x.com origin (e.g. a Playwright route), since the script
+  only accepts x.com / twitter.com links.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 15px/1.4 sans-serif; width: 600px; margin: 0; }
+  article { display: block; padding: 12px; border-bottom: 1px solid #ccc; }
+  [role="group"] { display: flex; gap: 12px; margin-top: 8px; }
+  div[role="link"] { border: 1px solid #ccc; border-radius: 12px; padding: 12px; margin-top: 8px; }
+  .gap { height: 24px; }
+</style>
+</head>
+<body>
+<div id="react-root">
+  <article id="t1" role="article" data-testid="tweet" tabindex="0">
+    <div data-testid="Tweet-User-Avatar"><a id="t1-avatar" href="/alspee">avatar</a></div>
+    <div data-testid="User-Name">
+      <a href="/alspee">Al Spee</a>
+      <a id="t1-time" href="/alspee/status/111"><time datetime="2026-11-16T17:39:00.000Z">1h</time></a>
+    </div>
+    <div id="t1-text" data-testid="tweetText" lang="en"><span>Outer tweet text that should stay selectable.</span></div>
+    <div class="gap" id="t1-gap"></div>
+    <div id="q1" role="link" tabindex="0">
+      <div data-testid="Tweet-User-Avatar"><div role="presentation">qa</div></div>
+      <div data-testid="User-Name"><div>Quoted</div><div aria-label="Nov 12"><time datetime="2026-11-12T14:09:44.000Z">Nov 12</time></div></div>
+      <div id="q1-text" data-testid="tweetText" lang="en"><span>Quoted tweet text.</span></div>
+      <div class="gap" id="q1-gap"></div>
+    </div>
+    <div role="group">
+      <button data-testid="reply">reply</button>
+      <a href="/alspee/status/111/analytics">views</a>
+    </div>
+  </article>
+  <article id="t2" role="article" data-testid="tweet" tabindex="0">
+    <div data-testid="User-Name"><a href="/late">Late</a><span id="t2-timeslot"></span></div>
+    <div data-testid="tweetText"><span>Lazily rendered: no time link at first.</span></div>
+    <div class="gap" id="t2-gap"></div>
+  </article>
+</div>
+<script>
+  window.log = [];
+  // React delegates from the root; emulate that so stopPropagation on the overlay matters.
+  document.getElementById("react-root").addEventListener("click", (e) => {
+    const art = e.target.closest("article");
+    const card = e.target.closest('div[role="link"]');
+    window.log.push({ target: e.target.id || e.target.className || e.target.tagName, card: card && card.id, article: art && art.id, ctrl: e.ctrlKey, trusted: e.isTrusted });
+    e.preventDefault();
+  });
+  // Fake fiber chain on the quote card. The outer tweet's id deliberately comes
+  // first, so resolving the quote's URL has to rely on excluding it.
+  const outer = { memoizedProps: { link: { pathname: "/alspee/status/111" } }, return: null };
+  const quote = { memoizedProps: { link: { pathname: "/quoted/status/222" } }, return: outer };
+  document.getElementById("q1")["__reactFiber$fake"] = { memoizedProps: { href: "/alspee/status/111/analytics" }, return: quote };
+  // t2's time link shows up after the script's first scan.
+  setTimeout(() => {
+    document.getElementById("t2-timeslot").innerHTML = '<a id="t2-time" href="/late/status/333"><time>now</time></a>';
+  }, 300);
+</script>
+<script src="/__script.user.js"></script>
+</body>
+</html>
