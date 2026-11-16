@@ -17,6 +17,7 @@ Browser userscripts for Tampermonkey / Violentmonkey.
 | [豆瓣移动版转桌面版](douban-mobile-to-desktop/) | 把 Google 搜索结果里的豆瓣移动版链接直接改成桌面版；误入服务器不会自动跳转的移动版页面时补一次跳转 | [Install](https://raw.githubusercontent.com/lzblack/userscripts/main/douban-mobile-to-desktop/douban-mobile-to-desktop.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/605544) |
 | [双击选中文短语 / CJK Phrase Select（Firefox）](cjk-dblclick-select/) | 恢复 Firefox 双击 CJK 文本（中/日/韩）的旧行为：选中连续整段 CJK 字符直到下一个非 CJK 边界为止，修复 ICU4X 引入的"双击只选单字"回归 | [Install](https://raw.githubusercontent.com/lzblack/userscripts/main/cjk-dblclick-select/cjk-dblclick-select.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/578908) |
 | [Local Time Annotator](local-time-annotator/) | Append your local time after unambiguous absolute times on any page (`14:42 UTC` → ` (10:42 AM EDT)`), non-destructively; handles `<time>`, in-text offsets, and timestamps split across inline nodes (e.g. status pages) | [Install](https://raw.githubusercontent.com/lzblack/userscripts/main/local-time-annotator/local-time-annotator.user.js) | [Greasy Fork](https://greasyfork.org/) |
+| [X.com Draggable Tweets](x-draggable-tweets/) | Make entire tweet cards draggable as real links (works with Glitter Drag); quote cards drag as the quoted tweet, tweet text stays selectable | [Install](https://raw.githubusercontent.com/lzblack/userscripts/main/x-draggable-tweets/x-draggable-tweets.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/570633) |
 
 ## License
 
