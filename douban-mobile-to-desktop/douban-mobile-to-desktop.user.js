@@ -2,7 +2,7 @@
 // @name         豆瓣移动版转桌面版
 // @namespace    https://github.com/lzblack/userscripts
 // @homepageURL  https://github.com/lzblack/userscripts
-// @version      0.1.0
+// @version      0.2.0
 // @author       lzblack
 // @description  把 Google 搜索结果里的豆瓣移动版链接直接改成桌面版；误入服务器不会自动跳转的移动版页面时补一次跳转
 // @include      /^https:\/\/(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?\/search/
@@ -39,6 +39,9 @@
     [/^\/(group|note|doulist)\/(.+)$/, (m) => `https://www.douban.com/${m[1]}/${m[2]}`],
     [/^\/?$/, () => 'https://www.douban.com/'],
     [/^\/(movie|book|music)\/?$/, (m) => `https://${m[1]}.douban.com/`],
+    // 合集大多没有桌面对应物；只有这两个与桌面版 Top250 是同一份榜单（2026-11 逐条核对过前几名）。
+    // 移动版没有 music_top250 合集。
+    [/^\/subject_collection\/(movie|book)_top250\/?$/, (m) => `https://${m[1]}.douban.com/top250`],
   ];
 
   function parseUrl(href) {

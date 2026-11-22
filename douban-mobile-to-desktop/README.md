@@ -18,8 +18,9 @@ Google 搜索结果里常出现 `m.douban.com` 移动版链接。本脚本做两
 | `m.douban.com/search/?query=…` | `www.douban.com/search?q=…`（移动版的 `type` 丢弃） | 不会 |
 | `m.douban.com/`、`/movie/`、`/book/`、`/music/` | 对应桌面首页 | 不会 |
 | `m.douban.com/{group,note,doulist}/…` | `www.douban.com/` 下同路径 | 小组首页会 |
+| `m.douban.com/subject_collection/{movie,book}_top250` | `{movie,book}.douban.com/top250` | 不会 |
 
-"服务器自己会跳吗"是 2026-11 用桌面 UA 实测的结果；会跳的那些映射只为在 Google 上省一跳。没有桌面对应物或不认识的路径（如 `subject_collection`、用户主页子页）一律不动，不猜。
+"服务器自己会跳吗"是 2026-11 用桌面 UA 实测的结果；会跳的那些映射只为在 Google 上省一跳。没有桌面对应物或不认识的路径（如其他 `subject_collection` 合集、用户主页子页）一律不动，不猜。
 
 不能简单地把 `m.` 换成 `www.` 保留路径：那样条目页能靠 www 的 301 落对，但游戏条目、移动版独有页、用户主页子页都是 404，搜索也会丢掉关键词（移动版用 `query`，桌面版用 `q`）。
 

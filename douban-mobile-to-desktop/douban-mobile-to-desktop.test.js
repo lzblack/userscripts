@@ -60,10 +60,17 @@ test('小组、日记、豆列同路径搬到 www', () => {
   assert.equal(toDesktop('https://m.douban.com/doulist/1/'), 'https://www.douban.com/doulist/1/');
 });
 
+test('Top250 合集对应桌面版榜单页', () => {
+  assert.equal(toDesktop('https://m.douban.com/subject_collection/movie_top250'), 'https://movie.douban.com/top250');
+  assert.equal(toDesktop('https://m.douban.com/subject_collection/book_top250/'), 'https://book.douban.com/top250');
+});
+
 // ── 不动的 ────────────────────────────────────────────────────────────────
 
 test('没有桌面对应物或未知路径一律不动', () => {
   assert.equal(toDesktop('https://m.douban.com/subject_collection/movie_showing'), null);
+  // 移动版没有 music_top250 这个合集（API 返回 traversal_error）
+  assert.equal(toDesktop('https://m.douban.com/subject_collection/music_top250'), null);
   assert.equal(toDesktop('https://m.douban.com/tv/subject/26357307/'), null);
   assert.equal(toDesktop('https://m.douban.com/movie/subject/abc/'), null);
 });
